@@ -2,7 +2,7 @@ import './style.css';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 
-type Room = { code: string; endpoint: string; direct: boolean; detail: string; hostName: string | null };
+type Room = { code: string; endpoint: string; direct: boolean; manual: boolean; detail: string; hostName: string | null };
 type Msg = { name: string; text: string };
 type Event = { type: 'peer_joined' | 'chat' | 'disconnected'; name?: string; text?: string; reason?: string };
 type NextAction = 'host' | 'join';
@@ -44,11 +44,11 @@ function home() {
 function active() {
   const count = hosting ? Math.max(0, peers.length - 1) : peers.length;
   const countLabel = hosting ? 'friends connected' : 'room members';
-  return shell(`<section class="hero active room-hero"><div class="status-orb"><i></i></div><p class="eyebrow">${hosting ? 'HOST ONLINE | WAITING FOR CONNECTIONS' : 'CONNECTED DIRECTLY'}</p><h1>${hosting ? (peers.length > 1 ? 'Friends connected' : 'Waiting for friends') : `Connected to ${esc(room!.hostName || 'host')}`}</h1><p class="sub">${esc(room!.detail)}</p></section><section class="room"><label>CONNECTION STRING</label><div class="code long-code"><strong>${esc(room!.code.slice(0, 18))}...</strong><button id="copy">Copy</button></div><p>${esc(room!.endpoint)} | Only share with people you trust.</p></section><section class="peers"><div class="section-title"><h2>In this room</h2><span>${count} ${countLabel}</span></div>${peers.map((peer, index) => {
+  return shell(`<section class="hero active room-hero"><div class="status-orb"><i></i></div><p class="eyebrow">${hosting ? (room!.manual ? 'MANUAL ENDPOINT | WAITING FOR CONNECTIONS' : (room!.direct ? 'INTERNET READY | WAITING FOR CONNECTIONS' : 'LAN ONLY | WAITING FOR CONNECTIONS')) : 'CONNECTED DIRECTLY'}</p><h1>${hosting ? (peers.length > 1 ? 'Friends connected' : 'Waiting for friends') : `Connected to ${esc(room!.hostName || 'host')}`}</h1><p class="sub">${esc(room!.detail)}</p></section><section class="room"><label>CONNECTION STRING</label><div class="code long-code"><strong>${esc(room!.code.slice(0, 18))}...</strong><button id="copy">Copy</button></div><p>${esc(room!.endpoint)} | Only share with people you trust.</p></section><section class="peers"><div class="section-title"><h2>In this room</h2><span>${count} ${countLabel}</span></div>${peers.map((peer, index) => {
     const isSelf = index === 0;
     const isHost = hosting ? isSelf : peer === room?.hostName;
     return `<div class="peer"><span class="avatar">${esc(peer[0] || '?')}</span><p><b>${esc(peer)}${isSelf ? ' <small>(you)</small>' : ''}</b></p><em>${isHost ? 'Host' : 'Online'}</em></div>`;
-  }).join('')}<button class="chat-launch" id="chat">Open direct test chat</button><button class="stop" id="stop">${hosting ? 'Stop hosting' : 'Disconnect'}</button></section>${chatOpen ? chat() : ''}`);
+  }).join('')}${hosting && !room!.direct ? '<button class="diagnostic" id="manual">Configure internet access</button>' : ''}<button class="chat-launch" id="chat">Open direct test chat</button><button class="stop" id="stop">${hosting ? 'Stop hosting' : 'Disconnect'}</button></section>${chatOpen ? chat() : ''}`);
 }
 
 function chat() {
@@ -120,6 +120,30 @@ function joinDialog() {
   });
 }
 
+function manualEndpointDialog() {
+  app.insertAdjacentHTML('beforeend', `<div class="modal" id="manual-modal"><div class="scrim" id="manual-cancel"></div><section class="dialog"><button class="close" id="manual-x">&times;</button><p class="eyebrow">MANUAL INTERNET ACCESS</p><h2>Use your public endpoint</h2><p>First forward TCP port <b>50177</b> on your router to this PC. Then enter your public IPv4 address or DNS hostname. Do not include a port.</p><form id="manual-form"><input name="publicHost" autocomplete="url" placeholder="93.184.216.34 or chat.example.com" autofocus required><button class="primary compact">Create code</button></form><p class="error-banner" id="manual-error" hidden></p></section></div>`);
+  const close = () => document.querySelector('#manual-modal')?.remove();
+  document.querySelector('#manual-cancel')?.addEventListener('click', close);
+  document.querySelector('#manual-x')?.addEventListener('click', close);
+  document.querySelector('#manual-form')?.addEventListener('submit', async event => {
+    event.preventDefault();
+    const form = event.currentTarget as HTMLFormElement;
+    const publicHost = new FormData(form).get('publicHost')?.toString().trim();
+    if (!publicHost) return;
+    try {
+      room = await invoke<Room>('set_manual_endpoint', { publicHost });
+      close();
+      render();
+    } catch (caught) {
+      const message = document.querySelector<HTMLElement>('#manual-error');
+      if (message) {
+        message.textContent = String(caught);
+        message.hidden = false;
+      }
+    }
+  });
+}
+
 function bind() {
   document.querySelector('#host')?.addEventListener('click', () => nameDialog('host'));
   document.querySelector('#join')?.addEventListener('click', () => nameDialog('join'));
@@ -135,6 +159,7 @@ function bind() {
     peers = [];
     render();
   });
+  document.querySelector('#manual')?.addEventListener('click', manualEndpointDialog);
   document.querySelector('#chat')?.addEventListener('click', () => {
     chatOpen = true;
     render();
