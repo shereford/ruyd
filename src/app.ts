@@ -16,6 +16,7 @@ let error = '';
 let peers: string[] = [];
 let messages: Msg[] = [];
 let chatOpen = false;
+let chatError = '';
 
 const esc = (value: string) => value.replace(/[&<>'"]/g, character => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
@@ -34,7 +35,7 @@ listen<Event>('ruyd-event', ({ payload }) => {
 });
 
 function shell(body: string) {
-  return `<main><header><div class="brand"><svg viewBox="0 0 32 32"><path d="M8 7.5h8.8a7.2 7.2 0 0 1 0 14.4H14l5.4 5.1h-5.8L5 18.6V7.5h3Zm3 5v5.4h5.5a2.7 2.7 0 0 0 0-5.4H11Z"/></svg><span>Ruyd</span></div><span>${room ? 'Direct' : 'Ready'}</span></header>${body}<footer><span class="shield">*</span> Player-hosted | No public Ruyd server</footer></main>`;
+  return `<main><header><div class="brand"><svg viewBox="0 0 32 32"><path d="M8 7.5h8.8a7.2 7.2 0 0 1 0 14.4H14l5.4 5.1h-5.8L5 18.6V7.5h3Zm3 5v5.4h5.5a2.7 2.7 0 0 0 0-5.4H11Z"/></svg><span>Ruyd</span></div><span>${room ? 'Direct' : 'Ready'}</span></header>${body}<footer><span class="shield">*</span> Ruyd v0.1.1 | Player-hosted | No public Ruyd server</footer></main>`;
 }
 
 function home() {
@@ -52,7 +53,7 @@ function active() {
 }
 
 function chat() {
-  return `<div class="modal"><div class="scrim" id="close"></div><section class="dialog"><button class="close" id="x">&times;</button><p class="eyebrow">DIRECT CONNECTION TEST</p><h2>Room chat</h2><div class="messages">${messages.length ? messages.map(message => `<div class="message ${message.name === name ? 'mine' : ''}"><small>${esc(message.name)}</small><p>${esc(message.text)}</p></div>`).join('') : '<div class="empty-chat">No messages yet.<br/>Say hello to test the connection.</div>'}</div><form id="chat-form" class="chat-form"><input name="message" maxlength="500" autocomplete="off" placeholder="Type a message..." autofocus><button class="primary compact">&uarr;</button></form></section></div>`;
+  return `<div class="modal"><div class="scrim" id="close"></div><section class="dialog"><button class="close" id="x">&times;</button><p class="eyebrow">DIRECT CONNECTION TEST</p><h2>Room chat</h2><div class="messages">${messages.length ? messages.map(message => `<div class="message ${message.name === name ? 'mine' : ''}"><small>${esc(message.name)}</small><p>${esc(message.text)}</p></div>`).join('') : '<div class="empty-chat">No messages yet.<br/>Say hello to test the connection.</div>'}</div>${chatError ? `<p class="chat-error">${esc(chatError)}</p>` : ''}<form id="chat-form" class="chat-form"><input name="message" maxlength="500" autocomplete="off" placeholder="Type a message..." autofocus><button class="primary compact">&uarr;</button></form></section></div>`;
 }
 
 function nameDialog(next: NextAction) {
@@ -156,6 +157,7 @@ function bind() {
     room = null;
     hosting = false;
     messages = [];
+    chatError = '';
     peers = [];
     render();
   });
@@ -170,15 +172,18 @@ function bind() {
   };
   document.querySelector('#close')?.addEventListener('click', closeChat);
   document.querySelector('#x')?.addEventListener('click', closeChat);
-  document.querySelector('#chat-form')?.addEventListener('submit', async event => {
+  document.querySelector('#chat-form')?.addEventListener('submit', event => {
     event.preventDefault();
     const form = event.currentTarget as HTMLFormElement;
     const text = new FormData(form).get('message')?.toString().trim();
     if (text) {
       messages.push({ name, text });
-      await invoke('send_chat', { text });
-      form.reset();
+      chatError = '';
       render();
+      void invoke<number>('send_chat', { text }).catch(caught => {
+        chatError = `Send failed: ${String(caught)}`;
+        render();
+      });
     }
   });
 }

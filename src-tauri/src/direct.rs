@@ -40,7 +40,7 @@ fn normalize_public_host(value:String)->Result<String,String>{
 }
 fn invite_code(host:&str,port:u16,secret:&str)->Result<String,String>{let invite=Invite{v:1,host:host.into(),port,secret:secret.into()};Ok(format!("RUYD1-{}",URL_SAFE_NO_PAD.encode(serde_json::to_vec(&invite).map_err(|e|e.to_string())?)))}
 fn write_packet(stream:&mut TcpStream,packet:&Packet)->Result<(),String>{let mut value=serde_json::to_vec(packet).map_err(|e|e.to_string())?;value.push(b'\n');stream.write_all(&value).map_err(|e|e.to_string())?;stream.flush().map_err(|e|e.to_string())}
-fn broadcast(writers:&Arc<Mutex<Vec<TcpStream>>>,packet:&Packet){if let Ok(mut list)=writers.lock(){list.retain_mut(|stream|write_packet(stream,packet).is_ok())}}
+fn broadcast(writers:&Arc<Mutex<Vec<TcpStream>>>,packet:&Packet)->usize{if let Ok(mut list)=writers.lock(){list.retain_mut(|stream|write_packet(stream,packet).is_ok());list.len()}else{0}}
 fn emit(app:&AppHandle,event:UiEvent){let _=app.emit("ruyd-event",event);}
 
 #[tauri::command]
@@ -79,10 +79,10 @@ pub fn set_manual_endpoint(public_host:String)->Result<RoomInfo,String>{
 }
 
 fn handle_host_peer(mut stream:TcpStream,app:&AppHandle,secret:&str,host_name:&str,writers:&Arc<Mutex<Vec<TcpStream>>>,active:&Arc<AtomicBool>){
- let _=stream.set_nodelay(true);let _=stream.set_read_timeout(Some(Duration::from_secs(8)));let read=match stream.try_clone(){Ok(v)=>v,Err(_)=>return};let mut reader=BufReader::new(read);let mut line=String::new();
- if reader.read_line(&mut line).is_err(){return}
+ let _=stream.set_nodelay(true);if stream.set_read_timeout(Some(Duration::from_secs(8))).is_err(){return}let handshake=match stream.try_clone(){Ok(v)=>v,Err(_)=>return};let mut handshake_reader=BufReader::new(handshake);let mut line=String::new();
+ if handshake_reader.read_line(&mut line).is_err(){return}
  let name:String=match serde_json::from_str::<Packet>(&line){Ok(Packet::Join{name,secret:given})if given==secret=>name.chars().take(24).collect(),_=>return};
- let _=reader.get_mut().set_read_timeout(None);if write_packet(&mut stream,&Packet::Welcome{name:host_name.into()}).is_err(){return}
+ if stream.set_read_timeout(None).is_err(){return}drop(handshake_reader);let read=match stream.try_clone(){Ok(v)=>v,Err(_)=>return};let reader=BufReader::new(read);if write_packet(&mut stream,&Packet::Welcome{name:host_name.into()}).is_err(){return}
  if let Ok(copy)=stream.try_clone(){if let Ok(mut list)=writers.lock(){list.push(copy)}}
  emit(app,UiEvent::PeerJoined{name:name.clone()});broadcast(writers,&Packet::PeerJoined{name:name.clone()});
  let app=app.clone();let writers=writers.clone();let active=active.clone();
@@ -99,17 +99,18 @@ pub fn join_room(app:AppHandle,code:String,name:String)->Result<RoomInfo,String>
  let mut connected=None;let mut last_error=None;
  for address in addresses{match TcpStream::connect_timeout(&address,Duration::from_secs(10)){Ok(stream)=>{connected=Some((stream,address));break},Err(e)=>last_error=Some(e)}}
  let (mut stream,address)=connected.ok_or_else(||format!("Could not reach {}:{}. Confirm the host is online, Windows Firewall allows Ruyd, and TCP port {} is forwarded. {}",invite.host,invite.port,invite.port,last_error.map(|e|e.to_string()).unwrap_or_default()))?;
- let _=stream.set_nodelay(true);let _=stream.set_read_timeout(Some(Duration::from_secs(8)));
+ let _=stream.set_nodelay(true);stream.set_read_timeout(Some(Duration::from_secs(8))).map_err(|e|format!("Could not configure the host handshake: {e}"))?;
  write_packet(&mut stream,&Packet::Join{name:name.clone(),secret:invite.secret})?;
- let read=stream.try_clone().map_err(|e|e.to_string())?;let mut reader=BufReader::new(read);let mut line=String::new();reader.read_line(&mut line).map_err(|e|e.to_string())?;let _=reader.get_mut().set_read_timeout(None);
+ let handshake=stream.try_clone().map_err(|e|e.to_string())?;let mut handshake_reader=BufReader::new(handshake);let mut line=String::new();handshake_reader.read_line(&mut line).map_err(|e|e.to_string())?;
  let host_name=match serde_json::from_str(&line){Ok(Packet::Welcome{name})=>name.chars().take(24).collect::<String>(),_=>return Err("The host rejected this connection".into())};
+ stream.set_read_timeout(None).map_err(|e|format!("Could not finish the host handshake: {e}"))?;drop(handshake_reader);let read=stream.try_clone().map_err(|e|e.to_string())?;let reader=BufReader::new(read);
  let active=Arc::new(AtomicBool::new(true));let writers=Arc::new(Mutex::new(vec![stream]));
  *runtime().lock().map_err(|_|"Runtime lock failed")?=Some(Runtime{active:active.clone(),host:false,name,writers,local_ip:None,port:invite.port,secret:None,mapping:None});
  thread::spawn(move||{for line in reader.lines(){if !active.load(Ordering::Relaxed){break}let Ok(line)=line else{break};match serde_json::from_str(&line){Ok(Packet::Chat{name,text})=>emit(&app,UiEvent::Chat{name,text}),Ok(Packet::PeerJoined{name})=>emit(&app,UiEvent::PeerJoined{name}),_=>{}}}if active.load(Ordering::Relaxed){emit(&app,UiEvent::Disconnected{reason:"Host disconnected".into()})}});
  Ok(RoomInfo{code,endpoint:address.to_string(),direct:true,manual:false,detail:format!("Connected directly to {host_name}."),host_name:Some(host_name)})
 }
 #[tauri::command]
-pub fn send_chat(text:String)->Result<(),String>{let guard=runtime().lock().map_err(|_|"Runtime lock failed")?;let state=guard.as_ref().ok_or("Not connected")?;let text:String=text.trim().chars().take(500).collect();if text.is_empty(){return Ok(())}broadcast(&state.writers,&Packet::Chat{name:state.name.clone(),text});Ok(())}
+pub fn send_chat(text:String)->Result<usize,String>{let guard=runtime().lock().map_err(|_|"Runtime lock failed")?;let state=guard.as_ref().ok_or("Not connected")?;let text:String=text.trim().chars().take(500).collect();if text.is_empty(){return Ok(0)}let recipients=broadcast(&state.writers,&Packet::Chat{name:state.name.clone(),text});if recipients==0{Err("Message was not sent because no peer connection is available".into())}else{Ok(recipients)}}
 #[tauri::command]
 pub fn stop_room(){if let Ok(mut guard)=runtime().lock(){if let Some(state)=guard.take(){state.active.store(false,Ordering::Relaxed);broadcast(&state.writers,&Packet::Leave);if let Some((gateway,port))=state.mapping{thread::spawn(move||{let _=gateway.remove_port(PortMappingProtocol::TCP,port);});}}}}
 
@@ -122,7 +123,7 @@ mod tests{
  #[test]
  fn chat_reader_survives_handshake_timeout(){
   let listener=TcpListener::bind((Ipv4Addr::LOCALHOST,0)).unwrap();let address=listener.local_addr().unwrap();
-  let server=thread::spawn(move||{let (stream,_)=listener.accept().unwrap();stream.set_read_timeout(Some(Duration::from_millis(50))).unwrap();let read=stream.try_clone().unwrap();let mut reader=BufReader::new(read);reader.get_mut().set_read_timeout(None).unwrap();let mut line=String::new();assert!(reader.read_line(&mut line).unwrap()>0);assert!(matches!(serde_json::from_str::<Packet>(&line),Ok(Packet::Chat{name,text})if name=="client"&&text=="hello"));});
-  let mut client=TcpStream::connect(address).unwrap();thread::sleep(Duration::from_millis(150));write_packet(&mut client,&Packet::Chat{name:"client".into(),text:"hello".into()}).unwrap();server.join().unwrap();
+  let server=thread::spawn(move||{let (mut stream,_)=listener.accept().unwrap();stream.set_read_timeout(Some(Duration::from_millis(50))).unwrap();let mut handshake_reader=BufReader::new(stream.try_clone().unwrap());let mut line=String::new();handshake_reader.read_line(&mut line).unwrap();assert!(matches!(serde_json::from_str::<Packet>(&line),Ok(Packet::Join{..})));stream.set_read_timeout(None).unwrap();drop(handshake_reader);let mut reader=BufReader::new(stream.try_clone().unwrap());write_packet(&mut stream,&Packet::Welcome{name:"host".into()}).unwrap();line.clear();assert!(reader.read_line(&mut line).unwrap()>0);assert!(matches!(serde_json::from_str::<Packet>(&line),Ok(Packet::Chat{name,text})if name=="client"&&text=="hello"));write_packet(&mut stream,&Packet::Chat{name:"host".into(),text:"hi".into()}).unwrap();});
+  let mut client=TcpStream::connect(address).unwrap();write_packet(&mut client,&Packet::Join{name:"client".into(),secret:"secret".into()}).unwrap();let mut reader=BufReader::new(client.try_clone().unwrap());let mut line=String::new();reader.read_line(&mut line).unwrap();assert!(matches!(serde_json::from_str::<Packet>(&line),Ok(Packet::Welcome{..})));thread::sleep(Duration::from_millis(150));write_packet(&mut client,&Packet::Chat{name:"client".into(),text:"hello".into()}).unwrap();line.clear();assert!(reader.read_line(&mut line).unwrap()>0);assert!(matches!(serde_json::from_str::<Packet>(&line),Ok(Packet::Chat{name,text})if name=="host"&&text=="hi"));server.join().unwrap();
  }
 }
