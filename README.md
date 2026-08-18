@@ -1,3 +1,5 @@
+![Ruyd banner](docs/assets/ruyd-banner.png)
+
 # Ruyd
 
 [![CI](https://github.com/shereford/ruyd/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/shereford/ruyd/actions/workflows/ci.yml?query=branch%3Amaster)
