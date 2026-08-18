@@ -11,13 +11,13 @@ const HOST_PORT:u16=50177;
 pub struct RoomInfo{code:String,endpoint:String,direct:bool,manual:bool,detail:String,host_name:Option<String>}
 #[derive(Clone,Serialize)]
 #[serde(tag="type",rename_all="snake_case")]
-enum UiEvent{PeerJoined{name:String},Chat{name:String,text:String},Disconnected{reason:String}}
+pub enum UiEvent{PeerJoined{name:String},Chat{name:String,text:String},Disconnected{reason:String}}
 #[derive(Serialize,Deserialize)]
 struct Invite{v:u8,host:String,port:u16,secret:String}
 #[derive(Serialize,Deserialize)]
 #[serde(tag="type",rename_all="snake_case")]
 enum Packet{Join{name:String,secret:String},Welcome{name:String},Chat{name:String,text:String},PeerJoined{name:String},Leave}
-struct Runtime{active:Arc<AtomicBool>,host:bool,name:String,writers:Arc<Mutex<Vec<TcpStream>>>,local_ip:Option<Ipv4Addr>,port:u16,secret:Option<String>,mapping:Option<(Gateway,u16)>}
+struct Runtime{active:Arc<AtomicBool>,host:bool,name:String,writers:Arc<Mutex<Vec<TcpStream>>>,events:Arc<Mutex<Vec<UiEvent>>>,local_ip:Option<Ipv4Addr>,port:u16,secret:Option<String>,mapping:Option<(Gateway,u16)>}
 static RUNTIME:OnceLock<Mutex<Option<Runtime>>>=OnceLock::new();
 
 fn runtime()->&'static Mutex<Option<Runtime>>{RUNTIME.get_or_init(||Mutex::new(None))}
@@ -41,19 +41,19 @@ fn normalize_public_host(value:String)->Result<String,String>{
 fn invite_code(host:&str,port:u16,secret:&str)->Result<String,String>{let invite=Invite{v:1,host:host.into(),port,secret:secret.into()};Ok(format!("RUYD1-{}",URL_SAFE_NO_PAD.encode(serde_json::to_vec(&invite).map_err(|e|e.to_string())?)))}
 fn write_packet(stream:&mut TcpStream,packet:&Packet)->Result<(),String>{let mut value=serde_json::to_vec(packet).map_err(|e|e.to_string())?;value.push(b'\n');stream.write_all(&value).map_err(|e|e.to_string())?;stream.flush().map_err(|e|e.to_string())}
 fn broadcast(writers:&Arc<Mutex<Vec<TcpStream>>>,packet:&Packet)->usize{if let Ok(mut list)=writers.lock(){list.retain_mut(|stream|write_packet(stream,packet).is_ok());list.len()}else{0}}
-fn emit(app:&AppHandle,event:UiEvent){let _=app.emit("ruyd-event",event);}
+fn notify(app:&AppHandle,events:&Arc<Mutex<Vec<UiEvent>>>,event:UiEvent){if let Ok(mut queue)=events.lock(){queue.push(event.clone())}let _=app.emit("ruyd-event",event);}
 
 #[tauri::command]
 pub fn host_room(app:AppHandle,name:String)->Result<RoomInfo,String>{
  let name=display_name(name)?;stop_room();
  let listener=TcpListener::bind((Ipv4Addr::UNSPECIFIED,HOST_PORT)).map_err(|e|format!("Could not host on TCP port {HOST_PORT}: {e}. Stop any other Ruyd host and try again."))?;
  listener.set_nonblocking(true).map_err(|e|e.to_string())?;
- let local=local_ip()?;let secret=secret()?;let active=Arc::new(AtomicBool::new(true));let writers=Arc::new(Mutex::new(Vec::new()));
- let accept_secret=secret.clone();let host_name=name.clone();let accept_active=active.clone();let accept_writers=writers.clone();
+ let local=local_ip()?;let secret=secret()?;let active=Arc::new(AtomicBool::new(true));let writers=Arc::new(Mutex::new(Vec::new()));let events=Arc::new(Mutex::new(Vec::new()));
+ let accept_secret=secret.clone();let host_name=name.clone();let accept_active=active.clone();let accept_writers=writers.clone();let accept_events=events.clone();
  thread::spawn(move||while accept_active.load(Ordering::Relaxed){match listener.accept(){
-   Ok((stream,_))=>handle_host_peer(stream,&app,&accept_secret,&host_name,&accept_writers,&accept_active),
+   Ok((stream,_))=>handle_host_peer(stream,&app,&accept_secret,&host_name,&accept_writers,&accept_events,&accept_active),
    Err(e)if e.kind()==std::io::ErrorKind::WouldBlock=>thread::sleep(Duration::from_millis(50)),
-   Err(e)=>{emit(&app,UiEvent::Disconnected{reason:e.to_string()});break}
+   Err(e)=>{notify(&app,&accept_events,UiEvent::Disconnected{reason:e.to_string()});break}
  }});
  let options=SearchOptions{timeout:Some(Duration::from_secs(2)),single_search_timeout:Some(Duration::from_secs(2)),..Default::default()};
  let mapping:Result<(Gateway,IpAddr),String>=search_gateway(options).map_err(|e|e.to_string()).and_then(|gateway|{
@@ -66,7 +66,7 @@ pub fn host_room(app:AppHandle,name:String)->Result<RoomInfo,String>{
    Err(error)=>(format!("{local}:{HOST_PORT}"),false,format!("LAN only at {local}:{HOST_PORT}. Automatic router mapping failed: {error}. For internet access, forward TCP 50177 and configure a public endpoint below."),None)
  };
  let code=invite_code(endpoint.split(':').next().unwrap_or(&endpoint),HOST_PORT,&secret)?;
- *runtime().lock().map_err(|_|"Runtime lock failed")?=Some(Runtime{active,host:true,name,writers,local_ip:Some(local),port:HOST_PORT,secret:Some(secret),mapping:gateway_mapping});
+ *runtime().lock().map_err(|_|"Runtime lock failed")?=Some(Runtime{active,host:true,name,writers,events,local_ip:Some(local),port:HOST_PORT,secret:Some(secret),mapping:gateway_mapping});
  Ok(RoomInfo{code,endpoint,direct,manual:false,detail,host_name:None})
 }
 
@@ -78,15 +78,15 @@ pub fn set_manual_endpoint(public_host:String)->Result<RoomInfo,String>{
  Ok(RoomInfo{code:invite_code(&public_host,state.port,secret)?,endpoint,direct:true,manual:true,detail:format!("Manual internet endpoint configured. Confirm your router forwards TCP {} to {local}:{} and Windows Firewall allows Ruyd.",state.port,state.port),host_name:None})
 }
 
-fn handle_host_peer(mut stream:TcpStream,app:&AppHandle,secret:&str,host_name:&str,writers:&Arc<Mutex<Vec<TcpStream>>>,active:&Arc<AtomicBool>){
+fn handle_host_peer(mut stream:TcpStream,app:&AppHandle,secret:&str,host_name:&str,writers:&Arc<Mutex<Vec<TcpStream>>>,events:&Arc<Mutex<Vec<UiEvent>>>,active:&Arc<AtomicBool>){
  let _=stream.set_nodelay(true);if stream.set_read_timeout(Some(Duration::from_secs(8))).is_err(){return}let handshake=match stream.try_clone(){Ok(v)=>v,Err(_)=>return};let mut handshake_reader=BufReader::new(handshake);let mut line=String::new();
  if handshake_reader.read_line(&mut line).is_err(){return}
  let name:String=match serde_json::from_str::<Packet>(&line){Ok(Packet::Join{name,secret:given})if given==secret=>name.chars().take(24).collect(),_=>return};
  if stream.set_read_timeout(None).is_err(){return}drop(handshake_reader);let read=match stream.try_clone(){Ok(v)=>v,Err(_)=>return};let reader=BufReader::new(read);if write_packet(&mut stream,&Packet::Welcome{name:host_name.into()}).is_err(){return}
  if let Ok(copy)=stream.try_clone(){if let Ok(mut list)=writers.lock(){list.push(copy)}}
- emit(app,UiEvent::PeerJoined{name:name.clone()});broadcast(writers,&Packet::PeerJoined{name:name.clone()});
- let app=app.clone();let writers=writers.clone();let active=active.clone();
- thread::spawn(move||for line in reader.lines(){if !active.load(Ordering::Relaxed){break}let Ok(line)=line else{break};if let Ok(Packet::Chat{name,text})=serde_json::from_str(&line){let text:String=text.chars().take(500).collect();emit(&app,UiEvent::Chat{name:name.clone(),text:text.clone()});broadcast(&writers,&Packet::Chat{name,text});}});
+ notify(app,events,UiEvent::PeerJoined{name:name.clone()});broadcast(writers,&Packet::PeerJoined{name:name.clone()});
+ let app=app.clone();let writers=writers.clone();let events=events.clone();let active=active.clone();
+ thread::spawn(move||for line in reader.lines(){if !active.load(Ordering::Relaxed){break}let Ok(line)=line else{break};if let Ok(Packet::Chat{name,text})=serde_json::from_str(&line){let text:String=text.chars().take(500).collect();notify(&app,&events,UiEvent::Chat{name:name.clone(),text:text.clone()});broadcast(&writers,&Packet::Chat{name,text});}});
 }
 
 #[tauri::command]
@@ -104,11 +104,14 @@ pub fn join_room(app:AppHandle,code:String,name:String)->Result<RoomInfo,String>
  let handshake=stream.try_clone().map_err(|e|e.to_string())?;let mut handshake_reader=BufReader::new(handshake);let mut line=String::new();handshake_reader.read_line(&mut line).map_err(|e|e.to_string())?;
  let host_name=match serde_json::from_str(&line){Ok(Packet::Welcome{name})=>name.chars().take(24).collect::<String>(),_=>return Err("The host rejected this connection".into())};
  stream.set_read_timeout(None).map_err(|e|format!("Could not finish the host handshake: {e}"))?;drop(handshake_reader);let read=stream.try_clone().map_err(|e|e.to_string())?;let reader=BufReader::new(read);
- let active=Arc::new(AtomicBool::new(true));let writers=Arc::new(Mutex::new(vec![stream]));
- *runtime().lock().map_err(|_|"Runtime lock failed")?=Some(Runtime{active:active.clone(),host:false,name,writers,local_ip:None,port:invite.port,secret:None,mapping:None});
- thread::spawn(move||{for line in reader.lines(){if !active.load(Ordering::Relaxed){break}let Ok(line)=line else{break};match serde_json::from_str(&line){Ok(Packet::Chat{name,text})=>emit(&app,UiEvent::Chat{name,text}),Ok(Packet::PeerJoined{name})=>emit(&app,UiEvent::PeerJoined{name}),_=>{}}}if active.load(Ordering::Relaxed){emit(&app,UiEvent::Disconnected{reason:"Host disconnected".into()})}});
+ let active=Arc::new(AtomicBool::new(true));let writers=Arc::new(Mutex::new(vec![stream]));let events=Arc::new(Mutex::new(Vec::new()));
+ *runtime().lock().map_err(|_|"Runtime lock failed")?=Some(Runtime{active:active.clone(),host:false,name,writers,events:events.clone(),local_ip:None,port:invite.port,secret:None,mapping:None});
+ thread::spawn(move||{for line in reader.lines(){if !active.load(Ordering::Relaxed){break}let Ok(line)=line else{break};match serde_json::from_str(&line){Ok(Packet::Chat{name,text})=>notify(&app,&events,UiEvent::Chat{name,text}),Ok(Packet::PeerJoined{name})=>notify(&app,&events,UiEvent::PeerJoined{name}),_=>{}}}if active.load(Ordering::Relaxed){notify(&app,&events,UiEvent::Disconnected{reason:"Host disconnected".into()})}});
  Ok(RoomInfo{code,endpoint:address.to_string(),direct:true,manual:false,detail:format!("Connected directly to {host_name}."),host_name:Some(host_name)})
 }
+#[tauri::command]
+pub fn drain_events()->Vec<UiEvent>{let events={let Ok(guard)=runtime().lock()else{return Vec::new()};guard.as_ref().map(|state|state.events.clone())};let Some(events)=events else{return Vec::new()};let drained=match events.lock(){Ok(mut queue)=>std::mem::take(&mut *queue),Err(_)=>Vec::new()};drained}
+
 #[tauri::command]
 pub fn send_chat(text:String)->Result<usize,String>{let guard=runtime().lock().map_err(|_|"Runtime lock failed")?;let state=guard.as_ref().ok_or("Not connected")?;let text:String=text.trim().chars().take(500).collect();if text.is_empty(){return Ok(0)}let recipients=broadcast(&state.writers,&Packet::Chat{name:state.name.clone(),text});if recipients==0{Err("Message was not sent because no peer connection is available".into())}else{Ok(recipients)}}
 #[tauri::command]

@@ -1,6 +1,5 @@
 import './style.css';
 import { invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
 
 type Room = { code: string; endpoint: string; direct: boolean; manual: boolean; detail: string; hostName: string | null };
 type Msg = { name: string; text: string };
@@ -22,7 +21,7 @@ const esc = (value: string) => value.replace(/[&<>'"]/g, character => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
 }[character]!));
 
-listen<Event>('ruyd-event', ({ payload }) => {
+function applyEvent(payload: Event) {
   if (payload.type === 'peer_joined' && payload.name && !peers.includes(payload.name)) peers.push(payload.name);
   if (payload.type === 'chat' && payload.name && payload.text) messages.push({ name: payload.name, text: payload.text });
   if (payload.type === 'disconnected') {
@@ -31,11 +30,28 @@ listen<Event>('ruyd-event', ({ payload }) => {
     hosting = false;
     peers = [];
   }
-  render();
-});
+}
+
+let polling = false;
+async function pollEvents() {
+  if (polling) return;
+  polling = true;
+  try {
+    const pending = await invoke<Event[]>('drain_events');
+    if (pending.length) {
+      pending.forEach(applyEvent);
+      render();
+    }
+  } catch {
+    // The native runtime may not be ready during application startup.
+  } finally {
+    polling = false;
+  }
+}
+window.setInterval(() => void pollEvents(), 150);
 
 function shell(body: string) {
-  return `<main><header><div class="brand"><svg viewBox="0 0 32 32"><path d="M8 7.5h8.8a7.2 7.2 0 0 1 0 14.4H14l5.4 5.1h-5.8L5 18.6V7.5h3Zm3 5v5.4h5.5a2.7 2.7 0 0 0 0-5.4H11Z"/></svg><span>Ruyd</span></div><span>${room ? 'Direct' : 'Ready'}</span></header>${body}<footer><span class="shield">*</span> Ruyd v0.1.1 | Player-hosted | No public Ruyd server</footer></main>`;
+  return `<main><header><div class="brand"><svg viewBox="0 0 32 32"><path d="M8 7.5h8.8a7.2 7.2 0 0 1 0 14.4H14l5.4 5.1h-5.8L5 18.6V7.5h3Zm3 5v5.4h5.5a2.7 2.7 0 0 0 0-5.4H11Z"/></svg><span>Ruyd</span></div><span>${room ? 'Direct' : 'Ready'}</span></header>${body}<footer><span class="shield">*</span> Ruyd v0.1.2 | Player-hosted | No public Ruyd server</footer></main>`;
 }
 
 function home() {
