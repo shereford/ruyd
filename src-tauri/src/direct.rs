@@ -29,7 +29,9 @@ pub fn host_room(app:AppHandle,name:String)->Result<RoomInfo,String>{
  stop_room();
  let listener=TcpListener::bind("0.0.0.0:0").map_err(|e|e.to_string())?;
  listener.set_nonblocking(true).map_err(|e|e.to_string())?;
- let local=local_ip()?,port=listener.local_addr().map_err(|e|e.to_string())?.port(),secret=secret()?;
+ let local=local_ip()?;
+ let port=listener.local_addr().map_err(|e|e.to_string())?.port();
+ let secret=secret()?;
  let (endpoint,direct,detail)=match search_gateway(Default::default()).and_then(|gateway|{
    gateway.get_any_address(PortMappingProtocol::TCP,SocketAddr::new(IpAddr::V4(local),port),7200,"Ruyd room").map_err(Into::into)
  }){Ok(addr)=>(addr.to_string(),true,"Router mapping active. Friends can connect directly.".into()),Err(error)=>(format!("{local}:{port}"),false,format!("Automatic router mapping failed ({error}). This code works only on the same LAN unless TCP port {port} is forwarded."))};
@@ -44,7 +46,7 @@ fn handle_host_peer(mut stream:TcpStream,app:&AppHandle,secret:&str,writers:&Arc
  let _=stream.set_read_timeout(Some(Duration::from_secs(8)));
  let read=match stream.try_clone(){Ok(v)=>v,Err(_)=>return};let mut reader=BufReader::new(read);let mut line=String::new();
  if reader.read_line(&mut line).is_err(){return}
- let name=match serde_json::from_str::<Packet>(&line){Ok(Packet::Join{name,secret:given})if given==secret=>name.chars().take(32).collect(),_=>return};
+ let name:String=match serde_json::from_str::<Packet>(&line){Ok(Packet::Join{name,secret:given})if given==secret=>name.chars().take(32).collect(),_=>return};
  let _=stream.set_read_timeout(None);if write_packet(&mut stream,&Packet::Welcome).is_err(){return}
  if let Ok(copy)=stream.try_clone(){if let Ok(mut list)=writers.lock(){list.push(copy)}}
  emit(app,UiEvent::PeerJoined{name:name.clone()});broadcast(writers,&Packet::PeerJoined{name:name.clone()});
