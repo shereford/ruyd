@@ -86,7 +86,7 @@ fn handle_host_peer(mut stream:TcpStream,app:&AppHandle,secret:&str,host_name:&s
  if let Ok(copy)=stream.try_clone(){if let Ok(mut list)=writers.lock(){list.push(copy)}}
  emit(app,UiEvent::PeerJoined{name:name.clone()});broadcast(writers,&Packet::PeerJoined{name:name.clone()});
  let app=app.clone();let writers=writers.clone();let active=active.clone();
- thread::spawn(move||for line in reader.lines(){if !active.load(Ordering::Relaxed){break}let Ok(line)=line else{break};if let Ok(Packet::Chat{name,text})=serde_json::from_str(&line){let text:String=text.chars().take(500).collect();emit(&app,UiEvent::Chat{name:name.clone(),text:text.clone()});broadcast(&writers,&Packet::Chat{name,text})}});
+ thread::spawn(move||for line in reader.lines(){if !active.load(Ordering::Relaxed){break}let Ok(line)=line else{break};if let Ok(Packet::Chat{name,text})=serde_json::from_str(&line){let text:String=text.chars().take(500).collect();emit(&app,UiEvent::Chat{name:name.clone(),text:text.clone()});broadcast(&writers,&Packet::Chat{name,text});}});
 }
 
 #[tauri::command]
