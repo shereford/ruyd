@@ -47,4 +47,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $assets = Get-ChildItem release -File | Select-Object -ExpandProperty FullName
-          gh release create $env:GITHUB_REF_NAME $assets --verify-tag --latest --title "Ruyd $env:GITHUB_REF_NAME" --notes "First versioned Ruyd Windows release. This development release is not Authenticode-signed and Windows may display a SmartScreen warning. SHA-256 checksums and GitHub build-provenance attestations are provided for verification."
+          gh release create $env:GITHUB_REF_NAME $assets --verify-tag --latest --title "Ruyd $env:GITHUB_REF_NAME" --notes "Ruyd Windows release. This development release is not Authenticode-signed and Windows may display a SmartScreen warning. SHA-256 checksums and GitHub build-provenance attestations are provided for verification."
