@@ -1,8 +1,11 @@
+mod direct;
+
 use tauri::{menu::{Menu, MenuItem}, tray::TrayIconBuilder, Manager};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .invoke_handler(tauri::generate_handler![direct::host_room, direct::join_room, direct::send_chat, direct::stop_room])
         .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|app| {
             let show = MenuItem::with_id(app, "show", "Open Ruyd", true, None::<&str>)?;
