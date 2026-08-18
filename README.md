@@ -36,3 +36,7 @@ Build the web UI with `npm run build`, or create a Windows installer with `npm r
 5. Replace simulated diagnostics with end-to-end route, peer, and discovery probes.
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the service boundaries and threat model.
+
+## License
+
+Ruyd is available under the [MIT License](LICENSE).
