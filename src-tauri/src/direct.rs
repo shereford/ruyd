@@ -32,9 +32,10 @@ pub fn host_room(app:AppHandle,name:String)->Result<RoomInfo,String>{
  let local=local_ip()?;
  let port=listener.local_addr().map_err(|e|e.to_string())?.port();
  let secret=secret()?;
- let (endpoint,direct,detail)=match search_gateway(Default::default()).and_then(|gateway|{
-   gateway.get_any_address(PortMappingProtocol::TCP,SocketAddr::new(IpAddr::V4(local),port),7200,"Ruyd room").map_err(Into::into)
- }){Ok(addr)=>(addr.to_string(),true,"Router mapping active. Friends can connect directly.".into()),Err(error)=>(format!("{local}:{port}"),false,format!("Automatic router mapping failed ({error}). This code works only on the same LAN unless TCP port {port} is forwarded."))};
+ let mapped=search_gateway(Default::default())
+   .map_err(|error|error.to_string())
+   .and_then(|gateway|gateway.get_any_address(PortMappingProtocol::TCP,SocketAddr::new(IpAddr::V4(local),port),7200,"Ruyd room").map_err(|error|error.to_string()));
+ let (endpoint,direct,detail)=match mapped{Ok(addr)=>(addr.to_string(),true,"Router mapping active. Friends can connect directly.".into()),Err(error)=>(format!("{local}:{port}"),false,format!("Automatic router mapping failed ({error}). This code works only on the same LAN unless TCP port {port} is forwarded."))};
  let invite=Invite{v:1,host:endpoint.rsplit_once(':').map(|v|v.0).unwrap_or(&endpoint).to_string(),port:endpoint.rsplit_once(':').and_then(|v|v.1.parse().ok()).unwrap_or(port),secret:secret.clone()};
  let code=format!("RUYD1-{}",URL_SAFE_NO_PAD.encode(serde_json::to_vec(&invite).map_err(|e|e.to_string())?));
  let active=Arc::new(AtomicBool::new(true));let writers=Arc::new(Mutex::new(Vec::new()));
