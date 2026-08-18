@@ -1,9 +1,0 @@
-services:
-  - type: web
-    name: ruyd-signaling
-    runtime: docker
-    plan: starter
-    healthCheckPath: /health
-    envVars:
-      - key: RUYD_ORIGINS
-        value: tauri://localhost

@@ -1,4 +1,0 @@
-import test from'node:test';import assert from'node:assert/strict';import{RoomStore,createRoomCode,normalizeCode,publicRoom,MAX_CLIENTS,ROOM_TTL_MS}from'./core.mjs';const c=(id,name=id)=>({id,name,ws:{}});
-test('codes normalize',()=>{const code=createRoomCode();assert.match(code,/^[A-Z2-9]{5}-[A-Z2-9]{8}$/);assert.equal(normalizeCode(code.toLowerCase()),code.replace('-',''))});
-test('room lifecycle',()=>{const s=new RoomStore(),r=s.create(c('a','Host'),100);assert.equal(s.join(r.code,c('b','Friend'),101),r);assert.deepEqual(publicRoom(r,'b').peers.map(p=>[p.name,p.virtualIp,p.self]),[['Host','100.82.45.1',false],['Friend','100.82.45.2',true]]);s.leave('a');assert.equal(s.roomFor('b'),null)});
-test('expiry and limit',()=>{const s=new RoomStore(),r=s.create(c('a'),1);assert.equal(s.join(r.code,c('late'),1+ROOM_TTL_MS),null);const f=s.create(c('0'));for(let i=1;i<MAX_CLIENTS;i++)s.join(f.code,c(String(i)));assert.throws(()=>s.join(f.code,c('x')),/room_full/)});
