@@ -8,16 +8,13 @@ Ruyd is a small, tray-first peer-to-peer app for connecting directly with friend
 
 The current release is an early Windows MVP focused on direct text chat. It does **not yet provide voice chat or create a virtual LAN for games**.
 
-## Download the latest Windows build
+## Download the latest Windows release
 
-[**Download the latest successful Windows build**](https://github.com/shereford/ruyd/actions/workflows/ci.yml?query=branch%3Amaster+is%3Asuccess)
+[**Download the latest versioned Windows release**](https://github.com/shereford/ruyd/releases/latest)
 
-1. Open the newest successful `master` workflow run.
-2. Scroll to **Artifacts**.
-3. Download **ruyd-windows-installers**.
-4. Extract the ZIP and run either the `.exe` installer or the `.msi` package.
+Download either the `.exe` installer or the `.msi` package. `SHA256SUMS.txt` contains the published file hashes. Release assets also include GitHub build-provenance attestations that can be checked with `gh release verify`.
 
-These are automated development builds and are not currently code-signed. Windows may display a SmartScreen warning. Review the repository and build workflow before installing software from an unsigned build.
+These development releases are not currently Authenticode-signed. Windows may display a SmartScreen warning. Review the repository, checksums, provenance, and build workflow before installing an unsigned build.
 
 ## How to use Ruyd
 
