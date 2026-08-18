@@ -22,11 +22,11 @@ These development releases are not currently Authenticode-signed. Windows may di
 
 1. Start Ruyd. It remains available from the Windows system tray when its window is closed.
 2. Click **Host** and enter your display name.
-3. Allow Ruyd through Windows Firewall if Windows asks. Hosting requires an inbound TCP connection.
+3. Allow Ruyd through Windows Firewall if Windows asks. Hosting uses inbound TCP port `50177`.
 4. Copy the generated connection code and send it privately to your friends.
 5. Keep Ruyd running while the room is in use. If the host exits, everyone is disconnected.
 
-Ruyd first asks the router for an automatic UPnP port mapping. If that succeeds, friends can normally connect over the internet. If it fails, the code works on the same local network; internet hosting then requires forwarding the TCP port shown by Ruyd to the host computer.
+Ruyd first asks the router for an automatic UPnP mapping of TCP port `50177`. If that succeeds, the room is labeled **Internet ready**. If it fails, the initial code is explicitly labeled **LAN only**. To host over the internet without UPnP, forward TCP `50177` to the host computer, click **Configure internet access**, and enter the router's public IPv4 address or a DNS hostname. A manual endpoint cannot be verified from inside the host's network, so confirm the forwarding and firewall settings before sharing the regenerated code.
 
 ### Connect to a room
 
@@ -42,11 +42,12 @@ Treat connection codes like temporary passwords. Only share them with intended p
 - Direct host-to-peer TCP chat with no required hosted Ruyd service
 - Shareable, authenticated room connection codes
 - Multiple chat participants and a connected-peer view
-- Automatic UPnP port mapping when supported by the host's router
+- Stable TCP port `50177` with automatic UPnP mapping when supported by the host's router
+- Manual public IPv4/DNS endpoint codes for hosts who configure port forwarding
 - Windows tray operation and Windows installers
 - No automatic reconnection yet; reconnect manually after an interruption
 - No end-to-end encryption yet; do not use the MVP for confidential conversations
-- No relay fallback, so carrier-grade NAT, strict firewalls, or double NAT can prevent internet connections
+- No relay fallback, so carrier-grade NAT, strict firewalls, or double NAT can still prevent internet connections
 - No voice, file transfer, virtual network adapter, game traffic, or LAN broadcast forwarding yet
 - Ruyd only opens its own application port and does not reroute normal web browsing, Discord, or other unrelated traffic
 
