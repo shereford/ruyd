@@ -1,5 +1,5 @@
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
-use igd_next::{search_gateway, PortMappingProtocol};
+use igd_next::{search_gateway, PortMappingProtocol, SearchOptions};
 use serde::{Deserialize, Serialize};
 use std::{io::{BufRead, BufReader, Write}, net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream, UdpSocket}, sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex, OnceLock}, thread, time::Duration};
 use tauri::{AppHandle, Emitter};
@@ -32,15 +32,17 @@ pub fn host_room(app:AppHandle,name:String)->Result<RoomInfo,String>{
  let local=local_ip()?;
  let port=listener.local_addr().map_err(|e|e.to_string())?.port();
  let secret=secret()?;
- let mapped=search_gateway(Default::default())
-   .map_err(|error|error.to_string())
-   .and_then(|gateway|gateway.get_any_address(PortMappingProtocol::TCP,SocketAddr::new(IpAddr::V4(local),port),7200,"Ruyd room").map_err(|error|error.to_string()));
- let (endpoint,direct,detail)=match mapped{Ok(addr)=>(addr.to_string(),true,"Router mapping active. Friends can connect directly.".into()),Err(error)=>(format!("{local}:{port}"),false,format!("Automatic router mapping failed ({error}). This code works only on the same LAN unless TCP port {port} is forwarded."))};
- let invite=Invite{v:1,host:endpoint.rsplit_once(':').map(|v|v.0).unwrap_or(&endpoint).to_string(),port:endpoint.rsplit_once(':').and_then(|v|v.1.parse().ok()).unwrap_or(port),secret:secret.clone()};
- let code=format!("RUYD1-{}",URL_SAFE_NO_PAD.encode(serde_json::to_vec(&invite).map_err(|e|e.to_string())?));
  let active=Arc::new(AtomicBool::new(true));let writers=Arc::new(Mutex::new(Vec::new()));
  *runtime().lock().map_err(|_|"Runtime lock failed")?=Some(Runtime{active:active.clone(),host:true,name:name.clone(),writers:writers.clone()});
- thread::spawn(move||{while active.load(Ordering::Relaxed){match listener.accept(){Ok((stream,_))=>handle_host_peer(stream,&app,&secret,&writers,&active),Err(e)if e.kind()==std::io::ErrorKind::WouldBlock=>thread::sleep(Duration::from_millis(50)),Err(e)=>{emit(&app,UiEvent::Disconnected{reason:e.to_string()});break}}}});
+ let accept_secret=secret.clone();
+ thread::spawn(move||{while active.load(Ordering::Relaxed){match listener.accept(){Ok((stream,_))=>handle_host_peer(stream,&app,&accept_secret,&writers,&active),Err(e)if e.kind()==std::io::ErrorKind::WouldBlock=>thread::sleep(Duration::from_millis(50)),Err(e)=>{emit(&app,UiEvent::Disconnected{reason:e.to_string()});break}}}});
+ let options=SearchOptions{timeout:Some(Duration::from_secs(2)),single_search_timeout:Some(Duration::from_secs(2)),..Default::default()};
+ let mapped=search_gateway(options)
+   .map_err(|error|error.to_string())
+   .and_then(|gateway|gateway.get_any_address(PortMappingProtocol::TCP,SocketAddr::new(IpAddr::V4(local),port),7200,"Ruyd room").map_err(|error|error.to_string()));
+ let (endpoint,direct,detail)=match mapped{Ok(addr)=>(addr.to_string(),true,"Host is active and waiting for connections. Router mapping is active for internet connections.".into()),Err(_error)=>(format!("{local}:{port}"),false,format!("Host is active and waiting for connections on your local network at {local}:{port}. Automatic internet access is unavailable."))};
+ let invite=Invite{v:1,host:endpoint.rsplit_once(':').map(|v|v.0).unwrap_or(&endpoint).to_string(),port:endpoint.rsplit_once(':').and_then(|v|v.1.parse().ok()).unwrap_or(port),secret:secret.clone()};
+ let code=format!("RUYD1-{}",URL_SAFE_NO_PAD.encode(serde_json::to_vec(&invite).map_err(|e|e.to_string())?));
  Ok(RoomInfo{code,endpoint,direct,detail})
 }
 fn handle_host_peer(mut stream:TcpStream,app:&AppHandle,secret:&str,writers:&Arc<Mutex<Vec<TcpStream>>>,active:&Arc<AtomicBool>){
