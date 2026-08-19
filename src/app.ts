@@ -1,14 +1,12 @@
 import './style.css';
-import { invoke } from '@tauri-apps/api/core';
+import { DirectConnectivity, type RoomInfo } from './connectivity';
 
-type Room = { code: string; endpoint: string; direct: boolean; manual: boolean; detail: string; hostName: string | null };
 type Msg = { name: string; text: string };
-type Event = { type: 'peer_joined' | 'chat' | 'disconnected'; name?: string; text?: string; reason?: string };
 type NextAction = 'host' | 'join';
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
 let name = localStorage.getItem('ruyd-name') || '';
-let room: Room | null = null;
+let room: RoomInfo | null = null;
 let hosting = false;
 let loading = false;
 let error = '';
@@ -21,55 +19,53 @@ const esc = (value: string) => value.replace(/[&<>'"]/g, character => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
 }[character]!));
 
-function applyEvent(payload: Event) {
-  if (payload.type === 'peer_joined' && payload.name && !peers.includes(payload.name)) peers.push(payload.name);
-  if (payload.type === 'chat' && payload.name && payload.text) messages.push({ name: payload.name, text: payload.text });
-  if (payload.type === 'disconnected') {
-    error = payload.reason || 'Disconnected';
+function addPeer(peer: string) {
+  if (peer && !peers.includes(peer)) peers.push(peer);
+}
+
+const connectivity = new DirectConnectivity({
+  onPeerJoined(peer) {
+    addPeer(peer);
+    render();
+  },
+  onPeerLeft(peer) {
+    peers = peers.filter((candidate) => candidate !== peer || candidate === name);
+    render();
+  },
+  onChat(sender, text) {
+    messages.push({ name: sender, text });
+    render();
+  },
+  onDisconnected(reason) {
+    void connectivity.stop();
+    error = reason;
     room = null;
     hosting = false;
     peers = [];
-  }
-}
-
-let polling = false;
-async function pollEvents() {
-  if (polling) return;
-  polling = true;
-  try {
-    const pending = await invoke<Event[]>('drain_events');
-    if (pending.length) {
-      pending.forEach(applyEvent);
-      render();
-    }
-  } catch {
-    // The native runtime may not be ready during application startup.
-  } finally {
-    polling = false;
-  }
-}
-window.setInterval(() => void pollEvents(), 150);
+    chatOpen = false;
+    render();
+  },
+});
 
 function shell(body: string) {
-  return `<main><header><div class="brand"><svg viewBox="0 0 32 32"><path d="M8 7.5h8.8a7.2 7.2 0 0 1 0 14.4H14l5.4 5.1h-5.8L5 18.6V7.5h3Zm3 5v5.4h5.5a2.7 2.7 0 0 0 0-5.4H11Z"/></svg><span>Ruyd</span></div><span>${room ? 'Direct' : 'Ready'}</span></header>${body}<footer><span class="shield">*</span> Ruyd v0.1.2 | Player-hosted | No public Ruyd server</footer></main>`;
+  return `<main><header><div class="brand"><svg viewBox="0 0 32 32"><path d="M8 7.5h8.8a7.2 7.2 0 0 1 0 14.4H14l5.4 5.1h-5.8L5 18.6V7.5h3Zm3 5v5.4h5.5a2.7 2.7 0 0 0 0-5.4H11Z"/></svg><span>Ruyd</span></div><span>${room ? 'Direct' : 'Ready'}</span></header>${body}<footer><span class="shield">*</span> Ruyd v0.2.0 | Direct first | No traffic relay</footer></main>`;
 }
 
 function home() {
-  return shell(`<section class="hero"><div class="status-orb"><i></i></div><p class="eyebrow">READY WHEN YOU ARE</p><h1>Play together.\nLike you're in the same room.</h1><p class="sub">The player who clicks Host becomes the room server. Everyone else connects directly.</p></section>${error ? `<p class="error-banner">${esc(error)}</p>` : ''}<section class="actions"><button class="primary" id="host" ${loading ? 'disabled' : ''}><span class="button-icon">+</span><span><b>${loading ? 'Starting host...' : 'Start hosting'}</b><small>Your PC becomes the room server</small></span><em>&rarr;</em></button><button class="secondary" id="join"><span class="button-icon">&rarr;</span><span><b>Connect</b><small>Paste the host's connection string</small></span><em>&rarr;</em></button></section><section class="how"><h2>No accounts. No hosted server.</h2><ol><li><span>1</span><p><b>Choose a display name</b><small>Only the name you enter is shared.</small></p></li><li><span>2</span><p><b>Host or connect</b><small>Ruyd links players directly.</small></p></li><li><span>3</span><p><b>Test with chat</b><small>Messages travel through the host.</small></p></li></ol></section>`);
+  return shell(`<section class="hero"><div class="status-orb"><i></i></div><p class="eyebrow">READY WHEN YOU ARE</p><h1>Play together.\nLike you're in the same room.</h1><p class="sub">One friend hosts, the others connect, and Ruyd negotiates an encrypted direct path automatically.</p></section>${error ? `<p class="error-banner">${esc(error)}</p>` : ''}<section class="actions"><button class="primary" id="host" ${loading ? 'disabled' : ''}><span class="button-icon">+</span><span><b>${loading ? 'Starting host...' : 'Start hosting'}</b><small>Wait for friends—no router setup</small></span><em>&rarr;</em></button><button class="secondary" id="join" ${loading ? 'disabled' : ''}><span class="button-icon">&rarr;</span><span><b>${loading ? 'Connecting...' : 'Connect'}</b><small>Paste the host's connection string</small></span><em>&rarr;</em></button></section><section class="how"><h2>No accounts. No traffic relay.</h2><ol><li><span>1</span><p><b>Choose a display name</b><small>Only the name you enter is shared.</small></p></li><li><span>2</span><p><b>Host or connect</b><small>Ruyd handles NAT discovery automatically.</small></p></li><li><span>3</span><p><b>Chat directly</b><small>Messages do not pass through Ruyd servers.</small></p></li></ol></section>`);
 }
 
 function active() {
-  const count = hosting ? Math.max(0, peers.length - 1) : peers.length;
-  const countLabel = hosting ? 'friends connected' : 'room members';
-  return shell(`<section class="hero active room-hero"><div class="status-orb"><i></i></div><p class="eyebrow">${hosting ? (room!.manual ? 'MANUAL ENDPOINT | WAITING FOR CONNECTIONS' : (room!.direct ? 'INTERNET READY | WAITING FOR CONNECTIONS' : 'LAN ONLY | WAITING FOR CONNECTIONS')) : 'CONNECTED DIRECTLY'}</p><h1>${hosting ? (peers.length > 1 ? 'Friends connected' : 'Waiting for friends') : `Connected to ${esc(room!.hostName || 'host')}`}</h1><p class="sub">${esc(room!.detail)}</p></section><section class="room"><label>CONNECTION STRING</label><div class="code long-code"><strong>${esc(room!.code.slice(0, 18))}...</strong><button id="copy">Copy</button></div><p>${esc(room!.endpoint)} | Only share with people you trust.</p></section><section class="peers"><div class="section-title"><h2>In this room</h2><span>${count} ${countLabel}</span></div>${peers.map((peer, index) => {
-    const isSelf = index === 0;
+  const count = hosting ? Math.max(0, peers.length - 1) : Math.max(0, peers.length - 1);
+  return shell(`<section class="hero active room-hero"><div class="status-orb"><i></i></div><p class="eyebrow">${hosting ? 'HOST ONLINE | WAITING FOR DIRECT CONNECTIONS' : 'ENCRYPTED DIRECT CONNECTION'}</p><h1>${hosting ? (peers.length > 1 ? 'Friends connected' : 'Waiting for friends') : `Connected to ${esc(room!.hostName || 'host')}`}</h1><p class="sub">${esc(room!.detail)}</p></section><section class="room"><label>CONNECTION STRING</label><div class="code long-code"><strong>${esc(room!.code.slice(0, 18))}...</strong><button id="copy">Copy</button></div><p>${esc(room!.endpoint)} | Only share with people you trust.</p></section><section class="peers"><div class="section-title"><h2>In this room</h2><span>${count} friends connected</span></div>${peers.map((peer) => {
+    const isSelf = peer === name;
     const isHost = hosting ? isSelf : peer === room?.hostName;
     return `<div class="peer"><span class="avatar">${esc(peer[0] || '?')}</span><p><b>${esc(peer)}${isSelf ? ' <small>(you)</small>' : ''}</b></p><em>${isHost ? 'Host' : 'Online'}</em></div>`;
-  }).join('')}${hosting && !room!.direct ? '<button class="diagnostic" id="manual">Configure internet access</button>' : ''}<button class="chat-launch" id="chat">Open direct test chat</button><button class="stop" id="stop">${hosting ? 'Stop hosting' : 'Disconnect'}</button></section>${chatOpen ? chat() : ''}`);
+  }).join('')}<button class="chat-launch" id="chat">Open encrypted test chat</button><button class="stop" id="stop">${hosting ? 'Stop hosting' : 'Disconnect'}</button></section>${chatOpen ? chat() : ''}`);
 }
 
 function chat() {
-  return `<div class="modal"><div class="scrim" id="close"></div><section class="dialog"><button class="close" id="x">&times;</button><p class="eyebrow">DIRECT CONNECTION TEST</p><h2>Room chat</h2><div class="messages">${messages.length ? messages.map(message => `<div class="message ${message.name === name ? 'mine' : ''}"><small>${esc(message.name)}</small><p>${esc(message.text)}</p></div>`).join('') : '<div class="empty-chat">No messages yet.<br/>Say hello to test the connection.</div>'}</div>${chatError ? `<p class="chat-error">${esc(chatError)}</p>` : ''}<form id="chat-form" class="chat-form"><input name="message" maxlength="500" autocomplete="off" placeholder="Type a message..." autofocus><button class="primary compact">&uarr;</button></form></section></div>`;
+  return `<div class="modal"><div class="scrim" id="close"></div><section class="dialog"><button class="close" id="x">&times;</button><p class="eyebrow">ENCRYPTED DIRECT CONNECTION TEST</p><h2>Room chat</h2><div class="messages">${messages.length ? messages.map(message => `<div class="message ${message.name === name ? 'mine' : ''}"><small>${esc(message.name)}</small><p>${esc(message.text)}</p></div>`).join('') : '<div class="empty-chat">No messages yet.<br/>Say hello to test the connection.</div>'}</div>${chatError ? `<p class="chat-error">${esc(chatError)}</p>` : ''}<form id="chat-form" class="chat-form"><input name="message" maxlength="500" autocomplete="off" placeholder="Type a message..." autofocus><button class="primary compact">&uarr;</button></form></section></div>`;
 }
 
 function nameDialog(next: NextAction) {
@@ -100,11 +96,11 @@ async function startHost() {
   error = '';
   render();
   try {
-    room = await invoke<Room>('host_room', { name });
+    room = await connectivity.host(name);
     hosting = true;
     peers = [name];
   } catch (caught) {
-    error = String(caught);
+    error = caught instanceof Error ? caught.message : String(caught);
   } finally {
     loading = false;
     render();
@@ -112,7 +108,7 @@ async function startHost() {
 }
 
 function joinDialog() {
-  app.insertAdjacentHTML('beforeend', `<div class="modal" id="join-modal"><div class="scrim" id="cancel"></div><section class="dialog"><button class="close" id="join-x">&times;</button><p class="eyebrow">CONNECT DIRECTLY</p><h2>Paste the host's connection string</h2><form id="join-form"><input name="code" autocomplete="off" placeholder="RUYD1-..." autofocus><button class="primary compact">Connect</button></form></section></div>`);
+  app.insertAdjacentHTML('beforeend', `<div class="modal" id="join-modal"><div class="scrim" id="cancel"></div><section class="dialog"><button class="close" id="join-x">&times;</button><p class="eyebrow">CONNECT DIRECTLY</p><h2>Paste the host's connection string</h2><p>Ruyd will discover a direct route automatically. You do not need to forward a port.</p><form id="join-form"><input name="code" autocomplete="off" placeholder="RUYD2-..." autofocus required><button class="primary compact">Connect</button></form></section></div>`);
   const close = () => document.querySelector('#join-modal')?.remove();
   document.querySelector('#cancel')?.addEventListener('click', close);
   document.querySelector('#join-x')?.addEventListener('click', close);
@@ -122,41 +118,19 @@ function joinDialog() {
     if (!code) return;
     close();
     loading = true;
+    error = '';
+    peers = [name];
     render();
     try {
-      room = await invoke<Room>('join_room', { code, name });
+      room = await connectivity.join(code, name);
       hosting = false;
-      peers = [name];
-      if (room.hostName && room.hostName !== name) peers.push(room.hostName);
+      addPeer(room.hostName || '');
     } catch (caught) {
-      error = String(caught);
+      error = caught instanceof Error ? caught.message : String(caught);
+      peers = [];
     } finally {
       loading = false;
       render();
-    }
-  });
-}
-
-function manualEndpointDialog() {
-  app.insertAdjacentHTML('beforeend', `<div class="modal" id="manual-modal"><div class="scrim" id="manual-cancel"></div><section class="dialog"><button class="close" id="manual-x">&times;</button><p class="eyebrow">MANUAL INTERNET ACCESS</p><h2>Use your public endpoint</h2><p>First forward TCP port <b>50177</b> on your router to this PC. Then enter your public IPv4 address or DNS hostname. Do not include a port.</p><form id="manual-form"><input name="publicHost" autocomplete="url" placeholder="93.184.216.34 or chat.example.com" autofocus required><button class="primary compact">Create code</button></form><p class="error-banner" id="manual-error" hidden></p></section></div>`);
-  const close = () => document.querySelector('#manual-modal')?.remove();
-  document.querySelector('#manual-cancel')?.addEventListener('click', close);
-  document.querySelector('#manual-x')?.addEventListener('click', close);
-  document.querySelector('#manual-form')?.addEventListener('submit', async event => {
-    event.preventDefault();
-    const form = event.currentTarget as HTMLFormElement;
-    const publicHost = new FormData(form).get('publicHost')?.toString().trim();
-    if (!publicHost) return;
-    try {
-      room = await invoke<Room>('set_manual_endpoint', { publicHost });
-      close();
-      render();
-    } catch (caught) {
-      const message = document.querySelector<HTMLElement>('#manual-error');
-      if (message) {
-        message.textContent = String(caught);
-        message.hidden = false;
-      }
     }
   });
 }
@@ -169,7 +143,7 @@ function bind() {
     (event.currentTarget as HTMLElement).textContent = 'Copied';
   });
   document.querySelector('#stop')?.addEventListener('click', async () => {
-    await invoke('stop_room');
+    await connectivity.stop();
     room = null;
     hosting = false;
     messages = [];
@@ -177,7 +151,6 @@ function bind() {
     peers = [];
     render();
   });
-  document.querySelector('#manual')?.addEventListener('click', manualEndpointDialog);
   document.querySelector('#chat')?.addEventListener('click', () => {
     chatOpen = true;
     render();
@@ -192,15 +165,15 @@ function bind() {
     event.preventDefault();
     const form = event.currentTarget as HTMLFormElement;
     const text = new FormData(form).get('message')?.toString().trim();
-    if (text) {
+    if (!text) return;
+    const recipients = connectivity.sendChat(text);
+    if (recipients === 0) {
+      chatError = 'Message was not sent because no direct peer connection is available.';
+    } else {
       messages.push({ name, text });
       chatError = '';
-      render();
-      void invoke<number>('send_chat', { text }).catch(caught => {
-        chatError = `Send failed: ${String(caught)}`;
-        render();
-      });
     }
+    render();
   });
 }
 
