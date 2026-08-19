@@ -1,0 +1,53 @@
+name: Request a game guide
+description: Suggest a LAN-capable game for a future Ruyd setup and compatibility guide.
+title: "Game guide: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping prioritize community documentation. Ruyd 0.2 is direct chat only; requesting a guide does not mean virtual-LAN support is available yet.
+  - type: input
+    id: game
+    attributes:
+      label: Game
+      description: Include the full game title.
+      placeholder: Game title
+    validations:
+      required: true
+  - type: input
+    id: edition
+    attributes:
+      label: Edition and launcher
+      description: Identify the edition and store or launcher, such as Steam, GOG, Epic, or Microsoft Store.
+      placeholder: Steam edition
+    validations:
+      required: true
+  - type: dropdown
+    id: lan_join
+    attributes:
+      label: Known LAN join method
+      options:
+        - Automatic LAN browser
+        - Manual direct IP
+        - Both automatic and direct IP
+        - Dedicated server
+        - Unknown
+    validations:
+      required: true
+  - type: textarea
+    id: documentation
+    attributes:
+      label: Useful official documentation
+      description: Link official game or launcher documentation about LAN or dedicated-server play.
+  - type: textarea
+    id: notes
+    attributes:
+      label: Additional context
+      description: Mention versions, observed behavior, or setup details. Do not include connection strings, IP addresses, credentials, or personal data.
+  - type: checkboxes
+    id: current_limit
+    attributes:
+      label: Current product limitation
+      options:
+        - label: I understand that Ruyd 0.2 does not yet transport game traffic and this is a documentation request for future virtual-LAN support.
+          required: true
