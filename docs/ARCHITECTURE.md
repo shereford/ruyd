@@ -29,6 +29,19 @@ A `RUYD2-` connection string contains a version, a random room identifier, and a
 
 The connection string does not contain a private or public IP address. Earlier `RUYD1` connection strings from the TCP prototype are intentionally rejected.
 
+## Version skew
+
+Two independent checks stop releases that speak different formats from half-connecting:
+
+- The `RUYD2-` prefix gates an **older client out of a newer room**. A client rejects any prefix it does not recognise before it contacts signaling, so bumping the prefix retires every older release at once.
+- The protocol version in the host's welcome packet gates a **newer client out of an older room**. The host announces `PROTOCOL_VERSION`; a client that reads a different value ends the connection and says both PCs need the same release. A welcome with no version is treated as version 1, because releases up to 0.2.0 did not send one.
+
+Bump both when the packet format changes. Neither check can protect an already-released binary from a format it has never seen, which is why the prefix exists as the coarse gate.
+
+## Host limits
+
+A host answers at most 16 peers at once and makes at most three attempts to answer any one peer's offer. Peers whose offers cannot be answered are then treated as unreachable for the life of the room, so an unusable offer cannot make the host rebuild a peer connection on every poll. The signaling service returns at most 32 peer records per room.
+
 ## Privacy and security properties
 
 - WebRTC data channels use DTLS and SCTP; chat contents are encrypted between Ruyd peers.

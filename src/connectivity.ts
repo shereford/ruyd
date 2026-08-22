@@ -9,11 +9,25 @@ const HOST_POLL_INTERVAL_MS = 3_000;
 const PEER_POLL_INTERVAL_MS = 750;
 const CONNECT_TIMEOUT_MS = 30_000;
 
+/**
+ * Version of the data-channel packet format, announced by the host in its welcome
+ * packet. Together with INVITE_PREFIX this gates both directions of a version skew:
+ * the prefix stops an older release from joining a newer room, and this version stops
+ * a newer release from misreading an older room. Bump both when the format changes.
+ */
+export const PROTOCOL_VERSION = 1;
+
+/** Highest number of peers a host will answer at once. */
+const MAX_PEERS = 16;
+
+/** Attempts to answer one peer's offer before it is treated as unreachable. */
+const MAX_ANSWER_ATTEMPTS = 3;
+
 type Invite = { v: 2; roomId: string; secret: string };
 type Description = { type: 'offer' | 'answer'; sdp: string };
 type SignalPeer = { peerId: string; name: string; offer: Description; answered: boolean };
 type Packet =
-  | { type: 'welcome'; hostName: string; peers: string[] }
+  | { type: 'welcome'; protocol?: number; hostName: string; peers: string[] }
   | { type: 'peer_joined'; name: string }
   | { type: 'peer_left'; name: string }
   | { type: 'chat'; name: string; text: string };
@@ -155,6 +169,29 @@ function directFailure(): Error {
   return new Error('A direct tunnel could not be established between these networks. No port forwarding is required, but this network combination may require future relay access.');
 }
 
+/**
+ * Validates a frame received from a peer. Everything crossing the data channel is
+ * attacker-controlled, so an unrecognised or malformed frame is dropped rather than
+ * partially applied.
+ */
+export function parsePacket(value: unknown): Packet | null {
+  if (typeof value !== 'string' || value.length > 10_000) return null;
+  try {
+    const packet = JSON.parse(value) as Record<string, unknown>;
+    if (!packet || typeof packet !== 'object' || Array.isArray(packet) || typeof packet.type !== 'string') return null;
+    if (packet.type === 'welcome'
+      && (packet.protocol === undefined || typeof packet.protocol === 'number')
+      && typeof packet.hostName === 'string'
+      && Array.isArray(packet.peers)
+      && packet.peers.every((peer) => typeof peer === 'string')) return packet as Packet;
+    if ((packet.type === 'peer_joined' || packet.type === 'peer_left') && typeof packet.name === 'string') return packet as Packet;
+    if (packet.type === 'chat' && typeof packet.name === 'string' && typeof packet.text === 'string') return packet as Packet;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 function send(channel: RTCDataChannel | null, packet: Packet): boolean {
   if (!channel || channel.readyState !== 'open') return false;
   channel.send(JSON.stringify(packet));
@@ -168,6 +205,7 @@ export class DirectConnectivity {
   private roomId = '';
   private hostToken = '';
   private hostPeers = new Map<string, HostPeer>();
+  private answerAttempts = new Map<string, number>();
   private clientConnection: RTCPeerConnection | null = null;
   private clientChannel: RTCDataChannel | null = null;
 
@@ -217,10 +255,12 @@ export class DirectConnectivity {
     this.clientChannel = channel;
 
     let hostName = '';
+    let welcomeError = '';
     let resolveWelcome!: () => void;
     const welcome = new Promise<void>((resolve) => { resolveWelcome = resolve; });
-    this.bindClientChannel(channel, (name) => {
+    this.bindClientChannel(channel, (name, error) => {
       hostName = name;
+      welcomeError = error ?? '';
       resolveWelcome();
     });
 
@@ -258,6 +298,7 @@ export class DirectConnectivity {
         welcome,
         delay(Math.max(1, deadline - Date.now()), signal).then(() => { throw directFailure(); }),
       ]);
+      if (welcomeError) throw new Error(welcomeError);
 
       return {
         code: code.trim(),
@@ -299,6 +340,7 @@ export class DirectConnectivity {
       peer.connection.close();
     });
     this.hostPeers.clear();
+    this.answerAttempts.clear();
     this.clientChannel?.close();
     this.clientConnection?.close();
     this.clientChannel = null;
@@ -319,9 +361,14 @@ export class DirectConnectivity {
         );
         consecutiveFailures = 0;
         for (const peer of result.peers) {
-          if (!peer.answered && !this.hostPeers.has(peer.peerId)) {
-            void this.answerPeer(peer, signal);
-          }
+          if (peer.answered || this.hostPeers.has(peer.peerId)) continue;
+          if (this.hostPeers.size >= MAX_PEERS) break;
+          // Without this, a peer whose offer can never be answered is retried on every
+          // poll for the lifetime of the room, building a peer connection each time.
+          const attempts = this.answerAttempts.get(peer.peerId) ?? 0;
+          if (attempts >= MAX_ANSWER_ATTEMPTS) continue;
+          this.answerAttempts.set(peer.peerId, attempts + 1);
+          void this.answerPeer(peer, signal);
         }
         await delay(HOST_POLL_INTERVAL_MS, signal);
       } catch (error) {
@@ -372,14 +419,14 @@ export class DirectConnectivity {
       const connectedPeers = [this.name, ...Array.from(this.hostPeers.values())
         .filter((candidate) => candidate.channel?.readyState === 'open')
         .map((candidate) => candidate.name)];
-      send(channel, { type: 'welcome', hostName: this.name, peers: connectedPeers });
+      send(channel, { type: 'welcome', protocol: PROTOCOL_VERSION, hostName: this.name, peers: connectedPeers });
       this.callbacks.onPeerJoined(peer.name);
       this.hostPeers.forEach((candidate, id) => {
         if (id !== peerId) send(candidate.channel, { type: 'peer_joined', name: peer.name });
       });
     });
     channel.addEventListener('message', (event) => {
-      const packet = this.parsePacket(event.data);
+      const packet = parsePacket(event.data);
       if (packet?.type !== 'chat') return;
       const text = Array.from(packet.text.trim()).slice(0, 500).join('');
       if (!text) return;
@@ -391,11 +438,20 @@ export class DirectConnectivity {
     channel.addEventListener('close', () => this.removeHostPeer(peerId));
   }
 
-  private bindClientChannel(channel: RTCDataChannel, onWelcome: (hostName: string) => void): void {
+  private bindClientChannel(
+    channel: RTCDataChannel,
+    onWelcome: (hostName: string, error?: string) => void,
+  ): void {
     channel.addEventListener('message', (event) => {
-      const packet = this.parsePacket(event.data);
+      const packet = parsePacket(event.data);
       if (!packet) return;
       if (packet.type === 'welcome') {
+        // Releases before this one did not announce a version; they speak version 1.
+        const protocol = packet.protocol ?? 1;
+        if (protocol !== PROTOCOL_VERSION) {
+          onWelcome('', `This room uses Ruyd connection protocol ${protocol} and this release uses ${PROTOCOL_VERSION}. Everyone in the room needs the same Ruyd release.`);
+          return;
+        }
         packet.peers.forEach((peer) => this.callbacks.onPeerJoined(peer));
         onWelcome(packet.hostName);
       } else if (packet.type === 'peer_joined') {
@@ -424,17 +480,4 @@ export class DirectConnectivity {
     }
   }
 
-  private parsePacket(value: unknown): Packet | null {
-    if (typeof value !== 'string' || value.length > 10_000) return null;
-    try {
-      const packet = JSON.parse(value) as Record<string, unknown>;
-      if (!packet || typeof packet.type !== 'string') return null;
-      if (packet.type === 'welcome' && typeof packet.hostName === 'string' && Array.isArray(packet.peers) && packet.peers.every((peer) => typeof peer === 'string')) return packet as Packet;
-      if ((packet.type === 'peer_joined' || packet.type === 'peer_left') && typeof packet.name === 'string') return packet as Packet;
-      if (packet.type === 'chat' && typeof packet.name === 'string' && typeof packet.text === 'string') return packet as Packet;
-      return null;
-    } catch {
-      return null;
-    }
-  }
 }

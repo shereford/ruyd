@@ -4,6 +4,8 @@ import {
   DirectConnectivity,
   ICE_CONFIGURATION,
   parseInvite,
+  parsePacket,
+  PROTOCOL_VERSION,
   SIGNALING_URL,
 } from './connectivity';
 
@@ -59,5 +61,62 @@ describe('Ruyd direct connectivity configuration', () => {
     });
     expect(connectivity.sendChat('hello')).toBe(0);
     expect(connectivity.sendChat('   ')).toBe(0);
+  });
+
+  it('reports that nothing was sent when there is no room', () => {
+    const connectivity = new DirectConnectivity({
+      onPeerJoined: () => undefined,
+      onPeerLeft: () => undefined,
+      onChat: () => undefined,
+      onDisconnected: () => undefined,
+    });
+    expect(connectivity.sendChat('hello')).toBe(0);
+    expect(connectivity.sendChat('   ')).toBe(0);
+  });
+});
+
+describe('data-channel packet validation', () => {
+  const welcome = { type: 'welcome', protocol: PROTOCOL_VERSION, hostName: 'Ada', peers: ['Ada'] };
+
+  it('accepts every packet the protocol defines', () => {
+    expect(parsePacket(JSON.stringify(welcome))).toEqual(welcome);
+    expect(parsePacket(JSON.stringify({ type: 'peer_joined', name: 'Bo' })))
+      .toEqual({ type: 'peer_joined', name: 'Bo' });
+    expect(parsePacket(JSON.stringify({ type: 'peer_left', name: 'Bo' })))
+      .toEqual({ type: 'peer_left', name: 'Bo' });
+    expect(parsePacket(JSON.stringify({ type: 'chat', name: 'Bo', text: 'hi' })))
+      .toEqual({ type: 'chat', name: 'Bo', text: 'hi' });
+  });
+
+  it('accepts a welcome from a release that predates protocol versioning', () => {
+    const { protocol: _protocol, ...legacy } = welcome;
+    expect(parsePacket(JSON.stringify(legacy))).toEqual(legacy);
+  });
+
+  it('drops frames that are not well-formed protocol packets', () => {
+    expect(parsePacket('not json')).toBeNull();
+    expect(parsePacket('null')).toBeNull();
+    expect(parsePacket('[]')).toBeNull();
+    expect(parsePacket('"a string"')).toBeNull();
+    expect(parsePacket(JSON.stringify({ type: 'unknown' }))).toBeNull();
+    expect(parsePacket(JSON.stringify({ hostName: 'Ada', peers: [] }))).toBeNull();
+  });
+
+  it('drops packets whose fields have the wrong shape', () => {
+    expect(parsePacket(JSON.stringify({ ...welcome, peers: 'Ada' }))).toBeNull();
+    expect(parsePacket(JSON.stringify({ ...welcome, peers: [1, 2] }))).toBeNull();
+    expect(parsePacket(JSON.stringify({ ...welcome, protocol: 'one' }))).toBeNull();
+    expect(parsePacket(JSON.stringify({ type: 'chat', name: 'Bo' }))).toBeNull();
+    expect(parsePacket(JSON.stringify({ type: 'chat', name: 'Bo', text: 42 }))).toBeNull();
+    expect(parsePacket(JSON.stringify({ type: 'peer_joined' }))).toBeNull();
+  });
+
+  it('drops frames that are not strings or are oversized', () => {
+    expect(parsePacket(undefined)).toBeNull();
+    expect(parsePacket(new ArrayBuffer(8))).toBeNull();
+    expect(parsePacket({ type: 'chat', name: 'Bo', text: 'hi' })).toBeNull();
+    const oversized = JSON.stringify({ type: 'chat', name: 'Bo', text: 'x'.repeat(10_001) });
+    expect(oversized.length).toBeGreaterThan(10_000);
+    expect(parsePacket(oversized)).toBeNull();
   });
 });
