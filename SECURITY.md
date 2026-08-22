@@ -42,4 +42,18 @@ issues, not as security advisories.
 - Ruyd 0.2 has no ICE restart or automatic rejoin. A failed connection has to be re-established
   manually.
 
+## Dependency alerts
+
+Dependabot alerts are triaged against the target that is actually shipped. Ruyd releases only
+`x86_64-pc-windows-msvc`, and `src-tauri/Cargo.lock` resolves dependencies for every platform Tauri
+supports, so an advisory can name a crate that is never compiled into a Ruyd binary. Check with:
+
+```bash
+cargo tree --manifest-path src-tauri/Cargo.toml -i <crate> --target x86_64-pc-windows-msvc
+```
+
+An alert dismissed on that basis has to be revisited when a platform is added. Native Linux support
+is on the roadmap and would pull in the GTK and WebKitGTK stack that most of these advisories come
+from.
+
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full security boundary.
