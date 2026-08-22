@@ -68,6 +68,11 @@ places that ship it:
 - `src-tauri/Cargo.toml`
 - `src-tauri/tauri.conf.json`
 
+Then run `cargo generate-lockfile --manifest-path src-tauri/Cargo.toml`, because the crate version
+appears in the lockfile, and add a `## <version>` section to `CHANGELOG.md`. The release body is
+built from that section by `scripts/release-notes.mjs`, and a test fails if the version in
+`package.json` has no entry.
+
 Then push the tag from `master`:
 
 ```bash
@@ -76,8 +81,12 @@ git push origin v0.2.1
 ```
 
 The workflow tests, builds, packages the `.exe` and `.msi`, writes `SHA256SUMS.txt`, attests the
-assets, and publishes the GitHub release. Verify the published assets with `gh release verify`
-before announcing the release.
+assets, and publishes the GitHub release with notes taken from the changelog. Verify the published
+assets with `gh release verify` before announcing the release.
+
+Nothing in the pipeline runs the packaged application. Install the built `.exe` on Windows and
+exercise hosting, joining, the copy button, close-to-tray, and notifications before announcing a
+release that changed the desktop shell.
 
 ## Before opening a pull request
 
