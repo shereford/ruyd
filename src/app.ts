@@ -234,4 +234,19 @@ function render() {
   }
 }
 
+// One document-level listener: the modals are rebuilt on every render, so binding
+// per-element would leak handlers.
+document.addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape') return;
+  const dialog = document.querySelector('#name-modal, #join-modal');
+  if (dialog) {
+    dialog.remove();
+    return;
+  }
+  if (chatOpen) {
+    chatOpen = false;
+    render();
+  }
+});
+
 render();
