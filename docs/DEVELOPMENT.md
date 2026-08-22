@@ -38,6 +38,21 @@ The public STUN server is configured separately in `src/connectivity.ts`.
 the published build-provenance attestations are worth attesting to. Regenerate the Rust lockfile
 with `cargo generate-lockfile --manifest-path src-tauri/Cargo.toml` when dependencies change.
 
+## Content Security Policy
+
+`app.security.csp` in `src-tauri/tauri.conf.json` applies to packaged builds and
+`app.security.devCsp` to `npm run tauri dev`. The development policy is looser because Vite
+serves modules from `http://localhost:1420`, pushes updates over a websocket, and injects styles
+inline; the packaged policy allows none of that.
+
+If a change needs a new origin, add it to the narrowest directive that works rather than widening
+`default-src`. Note that `connect-src` lists `stun:` defensively. Chromium does not currently apply
+CSP to `RTCPeerConnection` ICE servers, so it has no effect today, but it costs nothing and every
+Ruyd connection would fail if that ever changed.
+
+A CSP mistake surfaces only at runtime, and nothing in CI runs the packaged application. Install
+the build and exercise hosting, joining, and chat after changing either policy.
+
 ## Tauri permissions
 
 `src-tauri/capabilities/default.json` is the allow list of Tauri commands the WebView may invoke.
