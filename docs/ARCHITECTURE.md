@@ -36,6 +36,8 @@ The connection string does not contain a private or public IP address. Earlier `
 - The STUN endpoint observes source IP/port metadata but receives no chat contents.
 - The user chooses a display name; the app does not read the Windows username.
 - Tokens and connection strings are never intentionally logged by the Ruyd service.
+- The app contacts only `connect.ruyd.us`, `stun.ruyd.us`, and its direct peers. Fonts and every
+  other asset are bundled in the installer, so launching Ruyd contacts no third-party host.
 - The app installs no virtual adapter or route, so it cannot reroute web browsing, Discord, or other application traffic.
 - The public STUN firewall allows UDP 3478 only. TURN allocations, TCP, TLS, DTLS, and the Coturn CLI are disabled.
 - Closing the UI window hides it; choosing Quit from the tray exits the process and ends the room.

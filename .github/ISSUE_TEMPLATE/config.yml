@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/shereford/ruyd/security/advisories/new
+    about: Report privately through GitHub security advisories. Do not open a public issue.
+  - name: User guide and troubleshooting
+    url: https://github.com/shereford/ruyd/blob/master/docs/USER_GUIDE.md
+    about: Connection, tray, same-LAN, and privacy questions are answered here first.

@@ -48,6 +48,8 @@ This is not virtual-LAN support. Ruyd transports only its own chat messages; it 
 - The user selects a display name; Ruyd does not read the Windows username.
 - Ruyd does not install a default route or redirect web browsing, Discord, or other applications.
 - No port forwarding, UPnP mapping, or manual public-IP configuration is required.
+- Ruyd contacts only its own connection service, its STUN server, and your friends. It loads no
+  fonts, analytics, or other content from third-party websites.
 - The community service has no TURN relay, so some restrictive network combinations cannot establish a direct path.
 
 ## Troubleshooting

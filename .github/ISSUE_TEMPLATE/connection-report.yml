@@ -1,0 +1,84 @@
+name: Report a connection problem
+description: Report a failed or unstable Ruyd connection so network combinations that need a relay can be prioritized.
+title: "Connection: "
+labels: ["connectivity"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not paste connection strings, tokens, public IP addresses, or other people's data.
+        Describe the network type instead of naming the network.
+  - type: input
+    id: version
+    attributes:
+      label: Ruyd version
+      description: Shown at the bottom of the app window.
+      placeholder: "0.2.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: role
+    attributes:
+      label: Your role
+      options:
+        - Host
+        - Joining friend
+        - Both were tested
+    validations:
+      required: true
+  - type: dropdown
+    id: stage
+    attributes:
+      label: Where it failed
+      options:
+        - Could not reach the connection service
+        - The connection string was rejected
+        - A direct tunnel could not be established
+        - Connected, then dropped
+        - Connected, but messages did not arrive
+        - Something else
+    validations:
+      required: true
+  - type: textarea
+    id: message
+    attributes:
+      label: Exact message shown
+      description: Copy the text Ruyd displayed, if any.
+  - type: textarea
+    id: networks
+    attributes:
+      label: Network on each side
+      description: |
+        For each PC, describe the connection type without naming the network. Useful details are
+        home broadband, mobile hotspot, campus or corporate network, satellite or fixed wireless,
+        whether carrier-grade NAT is likely, and whether a VPN or security product was active.
+      placeholder: |
+        Host: home fibre, no VPN
+        Friend: mobile hotspot, likely CGNAT
+    validations:
+      required: true
+  - type: dropdown
+    id: same_lan
+    attributes:
+      label: Were both PCs on the same local network?
+      options:
+        - "No, separate networks"
+        - "Yes, same local network"
+        - Unknown
+    validations:
+      required: true
+  - type: textarea
+    id: retries
+    attributes:
+      label: What was already tried
+      description: |
+        For example: disconnecting a VPN, another network, restarting Ruyd, both PCs on the current
+        release, or reaching https://connect.ruyd.us/health in a browser. Do not forward a router
+        port or disable your firewall — Ruyd does not require either.
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Before submitting
+      options:
+        - label: This report contains no connection strings, tokens, public IP addresses, or other people's data.
+          required: true
