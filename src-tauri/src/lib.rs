@@ -1,3 +1,5 @@
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use tauri::{
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
@@ -6,6 +8,10 @@ use tauri::{
 use tauri_plugin_notification::NotificationExt;
 
 const TRAY_ID: &str = "ruyd";
+
+/// Closing the window hides Ruyd instead of quitting, which is not what the close button
+/// does in most Windows applications. Say so once per run, the first time it happens.
+static EXPLAINED_CLOSE_TO_TRAY: AtomicBool = AtomicBool::new(false);
 
 /// Reflects the room state in the tray tooltip. Once the window is hidden the tooltip
 /// is the only status the user can see without reopening Ruyd.
@@ -62,6 +68,15 @@ pub fn run() {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
                 let _ = window.hide();
+                if !EXPLAINED_CLOSE_TO_TRAY.swap(true, Ordering::Relaxed) {
+                    let _ = window
+                        .app_handle()
+                        .notification()
+                        .builder()
+                        .title("Ruyd is still running")
+                        .body("Your room stays open. Reopen Ruyd or quit it from the system tray.")
+                        .show();
+                }
             }
         })
         .run(tauri::generate_context!())

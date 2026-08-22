@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { ConnectionCallbacks } from './connectivity';
 import {
   createInvite,
+  disambiguate,
   DirectConnectivity,
   ICE_CONFIGURATION,
   parseInvite,
@@ -113,5 +114,32 @@ describe('data-channel packet validation', () => {
     const oversized = JSON.stringify({ type: 'chat', name: 'Bo', text: 'x'.repeat(10_001) });
     expect(oversized.length).toBeGreaterThan(10_000);
     expect(parsePacket(oversized)).toBeNull();
+  });
+});
+
+describe('duplicate display names', () => {
+  it('leaves a name alone when nobody else has it', () => {
+    expect(disambiguate('Ada', ['Bo', 'Cy'])).toBe('Ada');
+  });
+
+  it('numbers each later arrival', () => {
+    expect(disambiguate('Ada', ['Ada'])).toBe('Ada (2)');
+    expect(disambiguate('Ada', ['Ada', 'Ada (2)'])).toBe('Ada (3)');
+    expect(disambiguate('Ada', ['Ada', 'Ada (2)', 'Ada (3)'])).toBe('Ada (4)');
+  });
+
+  it('keeps the numbered name within the length the service accepts', () => {
+    const long = 'x'.repeat(24);
+    const numbered = disambiguate(long, [long]);
+    expect(numbered).toBe(`${'x'.repeat(20)} (2)`);
+    expect(Array.from(numbered)).toHaveLength(24);
+  });
+
+  it('counts by code point so an emoji name is not cut in half', () => {
+    const name = '🎮'.repeat(24);
+    const numbered = disambiguate(name, [name]);
+    // Twenty whole emoji plus the four-character marker, not twenty UTF-16 units.
+    expect(numbered).toBe(`${'🎮'.repeat(20)} (2)`);
+    expect(Array.from(numbered)).toHaveLength(24);
   });
 });

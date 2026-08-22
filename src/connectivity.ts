@@ -120,6 +120,27 @@ export function parseInvite(code: string): Invite {
   }
 }
 
+/** Longest display name the signaling service accepts, and so the longest the host shows. */
+const MAX_NAME_LENGTH = 24;
+
+/**
+ * Names are how the protocol identifies people: peer lists, join and leave notices, and
+ * message attribution all carry a name and nothing else. Two friends who pick the same
+ * one would collapse into a single entry and one leaving would remove both, so the host
+ * gives the later arrival a numbered name before it announces them to anyone.
+ */
+export function disambiguate(candidate: string, taken: Iterable<string>): string {
+  const used = new Set(taken);
+  if (!used.has(candidate)) return candidate;
+  for (let suffix = 2; suffix <= 99; suffix += 1) {
+    const marker = ` (${suffix})`;
+    const room = MAX_NAME_LENGTH - marker.length;
+    const attempt = Array.from(candidate).slice(0, room).join('') + marker;
+    if (!used.has(attempt)) return attempt;
+  }
+  return candidate;
+}
+
 function normalizeName(value: string): string {
   const name = Array.from(value.trim()).slice(0, 24).join('');
   if (Array.from(name).length < 2) throw new Error('Display name must be between 2 and 24 characters');
@@ -504,7 +525,8 @@ export class DirectConnectivity {
 
   private async answerPeer(peer: SignalPeer, signal: AbortSignal): Promise<void> {
     const connection = new RTCPeerConnection(ICE_CONFIGURATION);
-    const hostPeer: HostPeer = { name: peer.name, connection, channel: null };
+    const taken = [this.name, ...Array.from(this.hostPeers.values(), (candidate) => candidate.name)];
+    const hostPeer: HostPeer = { name: disambiguate(peer.name, taken), connection, channel: null };
     this.hostPeers.set(peer.peerId, hostPeer);
 
     connection.addEventListener('datachannel', (event) => {

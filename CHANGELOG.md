@@ -24,6 +24,8 @@ and the data-channel protocol can change between minor versions.
   a client that reads a different one says both PCs need the same release instead of
   timing out with a network error.
 - Escape closes the name, join, and chat dialogs.
+- Ruyd explains that it is still running the first time the window is closed, because
+  the close button quits most Windows applications.
 
 ### Fixed
 
@@ -43,6 +45,11 @@ and the data-channel protocol can change between minor versions.
 - **A dropped room leaked its conversation into the next one.** Messages were not
   cleared on disconnect, so a new room opened its chat pre-populated with the previous
   room's transcript.
+- **Two friends with the same display name collapsed into one.** Names are the only
+  identity the data-channel protocol carries, so a duplicate merged both people into a
+  single peer entry and either one leaving removed both. The host now numbers a later
+  arrival, `Sam (2)`, before announcing them. Clients receive names that are already
+  unique, so this needs no protocol change.
 - A peer whose offer could not be answered made the host build a new peer connection
   every three seconds for the life of the room. Answers are now capped at three
   attempts per peer, and a host answers at most sixteen peers at once.

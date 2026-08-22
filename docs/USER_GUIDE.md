@@ -21,7 +21,9 @@ Download the current `.exe` installer or `.msi` package from the [latest release
 4. Send it privately to the friends you want to invite.
 5. Leave Ruyd running while the room is in use.
 
-Closing the main window sends Ruyd to the system tray and keeps the room running. Choose **Stop hosting** to close the room, or **Quit Ruyd** from the tray to exit completely.
+If a friend joins with a name that is already in the room, Ruyd numbers the later one, so two people called Sam appear as `Sam` and `Sam (2)`.
+
+Closing the main window sends Ruyd to the system tray and keeps the room running. The first time you close it, Ruyd says so, because the close button on most Windows applications quits them. Choose **Stop hosting** to close the room, or **Quit Ruyd** from the tray to exit completely.
 
 While the window is hidden, Ruyd shows a Windows notification when a friend joins or sends a message, and the tray tooltip reports the room state. Notifications are raised only while the window is hidden; when Ruyd is on screen it just updates the chat. Hovering the tray icon shows the current status, and unread messages are counted on the chat button when you reopen the window.
 

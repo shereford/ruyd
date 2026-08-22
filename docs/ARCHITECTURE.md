@@ -38,6 +38,12 @@ Two independent checks stop releases that speak different formats from half-conn
 
 Bump both when the packet format changes. Neither check can protect an already-released binary from a format it has never seen, which is why the prefix exists as the coarse gate.
 
+## Display names
+
+Names are how the data-channel protocol identifies people: peer lists, join and leave notices, and message attribution all carry a name and nothing else. Two friends who chose the same name would therefore collapse into one entry, and one of them leaving would remove both.
+
+The host resolves this before it announces anyone. A joining peer whose name is already in the room is given a numbered one, `Sam (2)`, kept within the 24-character limit by trimming the original by code point rather than UTF-16 unit. Clients receive names that are already unique, so this needs no protocol change and older releases see it as an ordinary name.
+
 ## Host limits
 
 A host answers at most 16 peers at once and makes at most three attempts to answer any one peer's offer. Peers whose offers cannot be answered are then treated as unreachable for the life of the room, so an unusable offer cannot make the host rebuild a peer connection on every poll. The signaling service returns at most 32 peer records per room.
