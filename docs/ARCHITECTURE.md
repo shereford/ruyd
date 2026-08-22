@@ -41,6 +41,8 @@ The connection string does not contain a private or public IP address. Earlier `
 - The app installs no virtual adapter or route, so it cannot reroute web browsing, Discord, or other application traffic.
 - The public STUN firewall allows UDP 3478 only. TURN allocations, TCP, TLS, DTLS, and the Coturn CLI are disabled.
 - Closing the UI window hides it; choosing Quit from the tray exits the process and ends the room.
+- The packaged app grants its window exactly one Tauri command, `clipboard-manager:allow-write-text`,
+  declared in `src-tauri/capabilities/default.json`. Nothing else is reachable from the WebView.
 
 ## Availability and recovery
 
