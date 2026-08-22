@@ -62,17 +62,6 @@ describe('Ruyd direct connectivity configuration', () => {
     expect(connectivity.sendChat('hello')).toBe(0);
     expect(connectivity.sendChat('   ')).toBe(0);
   });
-
-  it('reports that nothing was sent when there is no room', () => {
-    const connectivity = new DirectConnectivity({
-      onPeerJoined: () => undefined,
-      onPeerLeft: () => undefined,
-      onChat: () => undefined,
-      onDisconnected: () => undefined,
-    });
-    expect(connectivity.sendChat('hello')).toBe(0);
-    expect(connectivity.sendChat('   ')).toBe(0);
-  });
 });
 
 describe('data-channel packet validation', () => {
