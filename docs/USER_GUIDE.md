@@ -58,6 +58,14 @@ This is not virtual-LAN support. Ruyd transports only its own chat messages; it 
 
 Confirm that the PC can access `https://connect.ruyd.us/health` in a browser and that a VPN, proxy, DNS filter, or security product is not blocking it.
 
+### Ruyd says it is reconnecting
+
+Ruyd noticed the connection drop and is re-entering the room for you. It tries five times over about half a minute. You do not need the connection string again, and your messages stay on screen. If it gives up, the host has usually stopped hosting or left the network.
+
+### Ruyd says nobody new can join
+
+The host's PC cannot currently reach `connect.ruyd.us`. Friends who are already connected are unaffected and can keep chatting, because their messages never travel through that service. New friends cannot join until it is reachable again. Ruyd keeps retrying on its own.
+
 ### A direct tunnel could not be established
 
 Both PCs reached signaling, but WebRTC could not find a usable direct path. Temporarily disconnecting a VPN or trying another ordinary network may help. Do not forward a router port or disable the Windows Firewall. Some carrier-grade NAT, symmetric NAT, enterprise firewall, and UDP-blocking combinations will require the planned optional relay service.

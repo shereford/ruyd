@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { ConnectionCallbacks } from './connectivity';
 import {
   createInvite,
   DirectConnectivity,
@@ -8,6 +9,16 @@ import {
   PROTOCOL_VERSION,
   SIGNALING_URL,
 } from './connectivity';
+
+const silentCallbacks = (): ConnectionCallbacks => ({
+  onPeerJoined: () => undefined,
+  onPeerLeft: () => undefined,
+  onChat: () => undefined,
+  onReconnecting: () => undefined,
+  onReconnected: () => undefined,
+  onSignalingDegraded: () => undefined,
+  onDisconnected: () => undefined,
+});
 
 const roomId = 'room_identifier_1234';
 const secret = 'invite_verifier_123456789012345678';
@@ -53,12 +64,7 @@ describe('Ruyd direct connectivity configuration', () => {
   });
 
   it('reports that nothing was sent when there is no room', () => {
-    const connectivity = new DirectConnectivity({
-      onPeerJoined: () => undefined,
-      onPeerLeft: () => undefined,
-      onChat: () => undefined,
-      onDisconnected: () => undefined,
-    });
+    const connectivity = new DirectConnectivity(silentCallbacks());
     expect(connectivity.sendChat('hello')).toBe(0);
     expect(connectivity.sendChat('   ')).toBe(0);
   });

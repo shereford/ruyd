@@ -15,6 +15,8 @@ let messages: Msg[] = [];
 let chatOpen = false;
 let chatError = '';
 let copyState: 'idle' | 'copied' | 'failed' = 'idle';
+let reconnecting: { attempt: number; attempts: number } | null = null;
+let signalingDegraded = false;
 
 const esc = (value: string) => value.replace(/[&<>'"]/g, character => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
@@ -53,6 +55,23 @@ const connectivity = new DirectConnectivity({
     messages.push({ name: sender, text });
     render();
   },
+  onReconnecting(attempt, attempts) {
+    reconnecting = { attempt, attempts };
+    // The room is rebuilt from the host's welcome packet on each attempt.
+    peers = [name];
+    chatError = '';
+    render();
+  },
+  onReconnected(restored) {
+    reconnecting = null;
+    room = restored;
+    error = '';
+    render();
+  },
+  onSignalingDegraded(degraded) {
+    signalingDegraded = degraded;
+    render();
+  },
   onDisconnected(reason) {
     void connectivity.stop();
     error = reason;
@@ -63,21 +82,33 @@ const connectivity = new DirectConnectivity({
     chatError = '';
     chatOpen = false;
     copyState = 'idle';
+    reconnecting = null;
+    signalingDegraded = false;
     render();
   },
 });
 
 function shell(body: string) {
-  return `<main><header><div class="brand"><svg viewBox="0 0 32 32"><path d="M8 7.5h8.8a7.2 7.2 0 0 1 0 14.4H14l5.4 5.1h-5.8L5 18.6V7.5h3Zm3 5v5.4h5.5a2.7 2.7 0 0 0 0-5.4H11Z"/></svg><span>Ruyd</span></div><span>${room ? 'Direct' : 'Ready'}</span></header>${body}<footer><span class="shield">*</span> Ruyd v${__RUYD_VERSION__} | Direct first | No traffic relay</footer></main>`;
+  return `<main><header><div class="brand"><svg viewBox="0 0 32 32"><path d="M8 7.5h8.8a7.2 7.2 0 0 1 0 14.4H14l5.4 5.1h-5.8L5 18.6V7.5h3Zm3 5v5.4h5.5a2.7 2.7 0 0 0 0-5.4H11Z"/></svg><span>Ruyd</span></div><span>${reconnecting ? 'Reconnecting' : room ? 'Direct' : 'Ready'}</span></header>${body}<footer><span class="shield">*</span> Ruyd v${__RUYD_VERSION__} | Direct first | No traffic relay</footer></main>`;
 }
 
 function home() {
   return shell(`<section class="hero"><div class="status-orb"><i></i></div><p class="eyebrow">READY WHEN YOU ARE</p><h1>Play together.\nLike you're in the same room.</h1><p class="sub">One friend hosts, the others connect, and Ruyd negotiates an encrypted direct path automatically.</p></section>${error ? `<p class="error-banner">${esc(error)}</p>` : ''}<section class="actions"><button class="primary" id="host" ${loading ? 'disabled' : ''}><span class="button-icon">+</span><span><b>${loading ? 'Starting host...' : 'Start hosting'}</b><small>Wait for friends—no router setup</small></span><em>&rarr;</em></button><button class="secondary" id="join" ${loading ? 'disabled' : ''}><span class="button-icon">&rarr;</span><span><b>${loading ? 'Connecting...' : 'Connect'}</b><small>Paste the host's connection string</small></span><em>&rarr;</em></button></section><section class="how"><h2>No accounts. No traffic relay.</h2><ol><li><span>1</span><p><b>Choose a display name</b><small>Only the name you enter is shared.</small></p></li><li><span>2</span><p><b>Host or connect</b><small>Ruyd handles NAT discovery automatically.</small></p></li><li><span>3</span><p><b>Chat directly</b><small>Messages do not pass through Ruyd servers.</small></p></li></ol></section>`);
 }
 
+function notice() {
+  if (reconnecting) {
+    return `<p class="notice working">Connection lost. Reconnecting, attempt ${reconnecting.attempt} of ${reconnecting.attempts}. You do not need the connection string again.</p>`;
+  }
+  if (signalingDegraded) {
+    return '<p class="notice">Ruyd cannot reach its connection service. Friends who are already connected are unaffected, but nobody new can join until it recovers.</p>';
+  }
+  return '';
+}
+
 function active() {
   const count = Math.max(0, peers.length - 1);
-  return shell(`<section class="hero active room-hero"><div class="status-orb"><i></i></div><p class="eyebrow">${hosting ? 'HOST ONLINE | WAITING FOR DIRECT CONNECTIONS' : 'ENCRYPTED DIRECT CONNECTION'}</p><h1>${hosting ? (peers.length > 1 ? 'Friends connected' : 'Waiting for friends') : `Connected to ${esc(room!.hostName || 'host')}`}</h1><p class="sub">${esc(room!.detail)}</p></section><section class="room"><label>CONNECTION STRING</label><div class="code long-code"><strong>${esc(room!.code.slice(0, 18))}...</strong><button id="copy">${copyState === 'copied' ? 'Copied' : copyState === 'failed' ? 'Retry' : 'Copy'}</button></div>${copyState === 'failed' ? `<input class="code-fallback" id="code-fallback" readonly value="${esc(room!.code)}">` : ''}<p>${copyState === 'failed' ? 'Ruyd could not reach the clipboard. Select the full connection string above and copy it manually.' : `${esc(room!.endpoint)} | Only share with people you trust.`}</p></section><section class="peers"><div class="section-title"><h2>In this room</h2><span>${count} friends connected</span></div>${peers.map((peer) => {
+  return shell(`<section class="hero active${reconnecting ? ' reconnecting' : ''}"><div class="status-orb"><i></i></div><p class="eyebrow">${hosting ? 'HOST ONLINE | WAITING FOR DIRECT CONNECTIONS' : 'ENCRYPTED DIRECT CONNECTION'}</p><h1>${hosting ? (peers.length > 1 ? 'Friends connected' : 'Waiting for friends') : `Connected to ${esc(room!.hostName || 'host')}`}</h1><p class="sub">${esc(room!.detail)}</p></section>${notice()}<section class="room"><label>CONNECTION STRING</label><div class="code"><strong>${esc(room!.code.slice(0, 18))}...</strong><button id="copy">${copyState === 'copied' ? 'Copied' : copyState === 'failed' ? 'Retry' : 'Copy'}</button></div>${copyState === 'failed' ? `<input class="code-fallback" id="code-fallback" readonly value="${esc(room!.code)}">` : ''}<p>${copyState === 'failed' ? 'Ruyd could not reach the clipboard. Select the full connection string above and copy it manually.' : `${esc(room!.endpoint)} | Only share with people you trust.`}</p></section><section class="peers"><div class="section-title"><h2>In this room</h2><span>${count} friends connected</span></div>${peers.map((peer) => {
     const isSelf = peer === name;
     const isHost = hosting ? isSelf : peer === room?.hostName;
     return `<div class="peer"><span class="avatar">${esc(peer[0] || '?')}</span><p><b>${esc(peer)}${isSelf ? ' <small>(you)</small>' : ''}</b></p><em>${isHost ? 'Host' : 'Online'}</em></div>`;
@@ -120,6 +151,8 @@ async function startHost() {
     hosting = true;
     peers = [name];
     copyState = 'idle';
+    reconnecting = null;
+    signalingDegraded = false;
   } catch (caught) {
     error = caught instanceof Error ? caught.message : String(caught);
   } finally {
@@ -146,6 +179,8 @@ function joinDialog() {
       room = await connectivity.join(code, name);
       hosting = false;
       copyState = 'idle';
+      reconnecting = null;
+      signalingDegraded = false;
       addPeer(room.hostName || '');
     } catch (caught) {
       error = caught instanceof Error ? caught.message : String(caught);
@@ -177,6 +212,8 @@ function bind() {
     chatError = '';
     peers = [];
     copyState = 'idle';
+    reconnecting = null;
+    signalingDegraded = false;
     render();
   });
   document.querySelector('#chat')?.addEventListener('click', () => {
@@ -196,7 +233,9 @@ function bind() {
     if (!text) return;
     const recipients = connectivity.sendChat(text);
     if (recipients === 0) {
-      chatError = 'Message was not sent because no direct peer connection is available.';
+      chatError = reconnecting
+        ? 'Message was not sent. Ruyd is still reconnecting.'
+        : 'Message was not sent because no direct peer connection is available.';
     } else {
       messages.push({ name, text });
       chatError = '';

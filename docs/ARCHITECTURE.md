@@ -59,7 +59,11 @@ A host answers at most 16 peers at once and makes at most three attempts to answ
 
 ## Availability and recovery
 
-WebRTC can recover from some short-lived packet loss or candidate-pair disruption without app involvement. Ruyd 0.2 does not yet perform an ICE restart or restore a room after the peer connection reaches a failed state; users reconnect with the room string.
+WebRTC can recover from some short-lived packet loss or candidate-pair disruption without app involvement. When the peer connection reaches a failed or closed state, a joined client re-enters the room automatically: up to five attempts with exponential backoff from two to fifteen seconds. Recovery is a fresh join with a new peer identifier rather than an ICE restart, because a peer's signaling record is write-once; the host answers the new offer like any other. The room credential, display name, and conversation are all kept, so the user is never asked for the connection string again.
+
+Recovery stops immediately, rather than running out the attempts, when signaling reports that the room is gone or the credential is refused. Those are final answers and retrying cannot change them.
+
+A host does not close its room when signaling becomes unreachable. Peers that are already connected exchange chat over their data channels and are unaffected; only new joins need signaling. The host retries with backoff up to thirty seconds and reports the degraded state to the user, and closes the room only when signaling says the room itself has expired.
 
 Because no relay is configured, some combinations of symmetric NAT, carrier-grade NAT, enterprise firewall, VPN policy, or UDP blocking will fail even though both users have ordinary internet access. Port forwarding is not part of the product. A future authenticated TURN service can provide an optional fallback while preserving direct-first ICE policy.
 
