@@ -3,6 +3,16 @@
 Ruyd is pre-1.0. Everyone in a room should run the same release: connection strings
 and the data-channel protocol can change between minor versions.
 
+## Unreleased
+
+### Changed
+
+- The WebView runs under a Content Security Policy. It was previously disabled outright
+  (`"csp": null`). Everything the app loads is packaged with it, so the policy is
+  `default-src 'self'` with `https://connect.ruyd.us` as the only remote origin allowed
+  anywhere, and no inline script or style. Development keeps a looser policy so the Vite
+  dev server and its websocket still work.
+
 ## 0.3.0
 
 ### Added
