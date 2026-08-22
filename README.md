@@ -35,8 +35,10 @@ Development releases are not currently Authenticode-signed, so Windows may displ
 - Direct encrypted WebRTC chat across local or separate networks
 - Public signaling and STUN path discovery with no router port forwarding
 - Multiple participants, peer list, Windows tray operation, and close-to-background hosting
+- Automatic reconnection after a dropped connection, without asking for the connection string again
+- Hosting survives a temporary loss of the connection service; connected friends keep chatting
 - Same-LAN chat requires internet access for room signaling; offline-LAN rooms are not supported
-- No TURN relay fallback or automatic rejoin after a failed connection
+- No TURN relay fallback, so some network combinations still cannot connect at all
 - No voice, file transfer, virtual adapter, game traffic, or LAN broadcast forwarding yet
 - No default route or interference with web browsing, Discord, or unrelated applications
 
@@ -44,7 +46,6 @@ Version 2 connection strings are not compatible with the earlier `RUYD1` TCP pro
 
 ## Roadmap
 
-- Add automatic reconnect, ICE restart, connection health, and session recovery
 - Add optional authenticated TURN relay access for networks where direct paths fail
 - Add peer-to-peer voice channels, device selection, mute, and push-to-talk
 - Add a narrowly routed virtual LAN transport and allow-listed game discovery forwarding

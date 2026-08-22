@@ -23,6 +23,19 @@ const MAX_PEERS = 16;
 /** Attempts to answer one peer's offer before it is treated as unreachable. */
 const MAX_ANSWER_ATTEMPTS = 3;
 
+/** Attempts a client makes to re-establish a dropped room before giving up. */
+const RECONNECT_ATTEMPTS = 5;
+const RECONNECT_BASE_DELAY_MS = 2_000;
+const RECONNECT_MAX_DELAY_MS = 15_000;
+
+/**
+ * Consecutive signaling failures a host tolerates before it tells the caller that
+ * new friends cannot join. It never stops retrying on its own: peers that are already
+ * connected talk over their data channels and are unaffected by signaling being down.
+ */
+const SIGNALING_DEGRADED_AFTER = 3;
+const SIGNALING_MAX_BACKOFF_MS = 30_000;
+
 type Invite = { v: 2; roomId: string; secret: string };
 type Description = { type: 'offer' | 'answer'; sdp: string };
 type SignalPeer = { peerId: string; name: string; offer: Description; answered: boolean };
@@ -36,6 +49,13 @@ export type ConnectionCallbacks = {
   onPeerJoined(name: string): void;
   onPeerLeft(name: string): void;
   onChat(name: string, text: string): void;
+  /** A client lost its room and is trying to re-establish it. */
+  onReconnecting(attempt: number, attempts: number, reason: string): void;
+  /** A client re-established its room. The room details may have changed. */
+  onReconnected(room: RoomInfo): void;
+  /** A host cannot reach signaling. Connected peers are unaffected; new joins are not possible. */
+  onSignalingDegraded(degraded: boolean): void;
+  /** The room ended and will not come back on its own. */
   onDisconnected(reason: string): void;
 };
 
@@ -120,6 +140,19 @@ function delay(milliseconds: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
+/** A signaling response that failed. `status` is 0 when the service could not be reached. */
+export class SignalingError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+    this.name = 'SignalingError';
+  }
+
+  /** True when retrying cannot help: the room is gone, or this credential is not valid for it. */
+  get isFatal(): boolean {
+    return this.status === 403 || this.status === 404 || this.status === 409;
+  }
+}
+
 async function request<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
   let response: Response;
   try {
@@ -132,10 +165,12 @@ async function request<T>(path: string, body: unknown, signal?: AbortSignal): Pr
     });
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') throw error;
-    throw new Error('Ruyd could not reach its connection service. Check your internet connection and try again.');
+    throw new SignalingError('Ruyd could not reach its connection service. Check your internet connection and try again.', 0);
   }
   const payload = await response.json().catch(() => ({})) as { error?: string } & T;
-  if (!response.ok) throw new Error(payload.error || `Connection service returned HTTP ${response.status}`);
+  if (!response.ok) {
+    throw new SignalingError(payload.error || `Connection service returned HTTP ${response.status}`, response.status);
+  }
   return payload;
 }
 
@@ -208,6 +243,9 @@ export class DirectConnectivity {
   private answerAttempts = new Map<string, number>();
   private clientConnection: RTCPeerConnection | null = null;
   private clientChannel: RTCDataChannel | null = null;
+  /** What a client needs to re-enter its room without asking the user for the code again. */
+  private rejoin: { code: string; name: string } | null = null;
+  private reconnecting = false;
 
   constructor(private readonly callbacks: ConnectionCallbacks) {}
 
@@ -241,6 +279,13 @@ export class DirectConnectivity {
 
   async join(code: string, displayName: string): Promise<RoomInfo> {
     await this.stop();
+    const room = await this.openClientRoom(code, displayName);
+    this.rejoin = { code, name: displayName };
+    return room;
+  }
+
+  private async openClientRoom(code: string, displayName: string): Promise<RoomInfo> {
+    await this.teardown();
     this.mode = 'client';
     this.name = normalizeName(displayName);
     const invite = parseInvite(code);
@@ -265,9 +310,10 @@ export class DirectConnectivity {
     });
 
     connection.addEventListener('connectionstatechange', () => {
-      if (this.mode !== 'client') return;
-      if (connection.connectionState === 'failed') this.callbacks.onDisconnected(directFailure().message);
-      if (connection.connectionState === 'closed') this.callbacks.onDisconnected('The direct connection was closed.');
+      // A superseded connection from an earlier attempt can still emit events.
+      if (this.mode !== 'client' || this.clientConnection !== connection) return;
+      if (connection.connectionState === 'failed') this.dropped(directFailure().message);
+      if (connection.connectionState === 'closed') this.dropped('The direct connection was closed.');
     });
 
     try {
@@ -307,9 +353,57 @@ export class DirectConnectivity {
         hostName,
       };
     } catch (error) {
-      await this.stop();
+      await this.teardown();
       throw error;
     }
+  }
+
+  /**
+   * A client lost its connection. Re-entering the room is a fresh join with a new peer
+   * identifier rather than an ICE restart, because the signaling record for a peer is
+   * write-once; the host answers it like any other new peer. The room credential, the
+   * display name, and the conversation are all kept, so the user is not asked for
+   * anything.
+   */
+  private dropped(reason: string): void {
+    if (this.mode !== 'client' || this.reconnecting) return;
+    if (!this.rejoin) {
+      this.callbacks.onDisconnected(reason);
+      return;
+    }
+    this.reconnecting = true;
+    void this.reconnectLoop(this.rejoin, reason);
+  }
+
+  private async reconnectLoop(target: { code: string; name: string }, reason: string): Promise<void> {
+    for (let attempt = 1; attempt <= RECONNECT_ATTEMPTS; attempt += 1) {
+      this.callbacks.onReconnecting(attempt, RECONNECT_ATTEMPTS, reason);
+      const wait = Math.min(RECONNECT_MAX_DELAY_MS, RECONNECT_BASE_DELAY_MS * 2 ** (attempt - 1));
+      try {
+        await delay(wait);
+      } catch {
+        return;
+      }
+      if (!this.reconnecting) return;
+      try {
+        const room = await this.openClientRoom(target.code, target.name);
+        if (!this.reconnecting) {
+          await this.teardown();
+          return;
+        }
+        this.reconnecting = false;
+        this.rejoin = target;
+        this.callbacks.onReconnected(room);
+        return;
+      } catch (error) {
+        reason = error instanceof Error ? error.message : String(error);
+        // The room is gone or the credential no longer works. Retrying cannot help.
+        if (error instanceof SignalingError && error.isFatal) break;
+      }
+    }
+    this.reconnecting = false;
+    this.rejoin = null;
+    this.callbacks.onDisconnected(reason);
   }
 
   sendChat(text: string): number {
@@ -327,7 +421,14 @@ export class DirectConnectivity {
     return 0;
   }
 
+  /** Ends the room at the user's request and cancels any reconnection in progress. */
   async stop(): Promise<void> {
+    this.reconnecting = false;
+    this.rejoin = null;
+    await this.teardown();
+  }
+
+  private async teardown(): Promise<void> {
     const closingMode = this.mode;
     this.mode = 'idle';
     this.abortController?.abort();
@@ -352,6 +453,7 @@ export class DirectConnectivity {
 
   private async hostPollLoop(signal: AbortSignal): Promise<void> {
     let consecutiveFailures = 0;
+    let degraded = false;
     while (this.mode === 'host' && !signal.aborted) {
       try {
         const result = await request<{ peers: SignalPeer[] }>(
@@ -360,6 +462,10 @@ export class DirectConnectivity {
           signal,
         );
         consecutiveFailures = 0;
+        if (degraded) {
+          degraded = false;
+          this.callbacks.onSignalingDegraded(false);
+        }
         for (const peer of result.peers) {
           if (peer.answered || this.hostPeers.has(peer.peerId)) continue;
           if (this.hostPeers.size >= MAX_PEERS) break;
@@ -373,13 +479,25 @@ export class DirectConnectivity {
         await delay(HOST_POLL_INTERVAL_MS, signal);
       } catch (error) {
         if (signal.aborted) return;
-        consecutiveFailures += 1;
-        if (consecutiveFailures >= 5) {
-          this.callbacks.onDisconnected(error instanceof Error ? error.message : String(error));
+        // The room expired or the host token stopped working. Nothing to retry.
+        if (error instanceof SignalingError && error.isFatal) {
+          this.callbacks.onDisconnected(
+            error.status === 404
+              ? 'This room is no longer available. Start hosting again to create a new one.'
+              : error.message,
+          );
           await this.stop();
           return;
         }
-        await delay(Math.min(5_000, consecutiveFailures * 1_000), signal).catch(() => undefined);
+        consecutiveFailures += 1;
+        // Keep retrying. Friends who are already connected talk over their data
+        // channels, so signaling being unreachable must not close a working room.
+        if (!degraded && consecutiveFailures >= SIGNALING_DEGRADED_AFTER) {
+          degraded = true;
+          this.callbacks.onSignalingDegraded(true);
+        }
+        const backoff = Math.min(SIGNALING_MAX_BACKOFF_MS, consecutiveFailures * 2_000);
+        await delay(backoff, signal).catch(() => undefined);
       }
     }
   }
@@ -463,7 +581,9 @@ export class DirectConnectivity {
       }
     });
     channel.addEventListener('close', () => {
-      if (this.mode === 'client') this.callbacks.onDisconnected('The host ended the direct connection.');
+      if (this.mode === 'client' && this.clientChannel === channel) {
+        this.dropped('The direct connection to the host ended.');
+      }
     });
   }
 
