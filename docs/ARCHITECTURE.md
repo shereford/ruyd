@@ -56,6 +56,10 @@ A host answers at most 16 peers at once and makes at most three attempts to answ
 - Closing the UI window hides it; choosing Quit from the tray exits the process and ends the room.
 - The packaged app grants its window exactly one Tauri command, `clipboard-manager:allow-write-text`,
   declared in `src-tauri/capabilities/default.json`. Nothing else is reachable from the WebView.
+- Notifications are raised by the Rust shell rather than from the WebView, so the notification plugin
+  needs no capability and the WebView cannot raise one directly. The shell decides whether to raise
+  one at all: nothing is shown while the window is visible. Notification bodies carry the sender's
+  display name and message text and enter the Windows notification history.
 
 ## Availability and recovery
 

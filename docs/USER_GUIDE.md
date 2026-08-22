@@ -23,6 +23,8 @@ Download the current `.exe` installer or `.msi` package from the [latest release
 
 Closing the main window sends Ruyd to the system tray and keeps the room running. Choose **Stop hosting** to close the room, or **Quit Ruyd** from the tray to exit completely.
 
+While the window is hidden, Ruyd shows a Windows notification when a friend joins or sends a message, and the tray tooltip reports the room state. Notifications are raised only while the window is hidden; when Ruyd is on screen it just updates the chat. Hovering the tray icon shows the current status, and unread messages are counted on the chat button when you reopen the window.
+
 ## Join a room
 
 1. Open Ruyd and choose **Connect**.
@@ -50,6 +52,9 @@ This is not virtual-LAN support. Ruyd transports only its own chat messages; it 
 - No port forwarding, UPnP mapping, or manual public-IP configuration is required.
 - Ruyd contacts only its own connection service, its STUN server, and your friends. It loads no
   fonts, analytics, or other content from third-party websites.
+- Notifications raised while the window is hidden contain the sender's display name and the message
+  text, and Windows keeps them in its notification history until they are dismissed or cleared. Turn
+  Ruyd's notifications off in Windows Settings if that history is not wanted on a shared PC.
 - The community service has no TURN relay, so some restrictive network combinations cannot establish a direct path.
 
 ## Troubleshooting

@@ -44,6 +44,11 @@ with `cargo generate-lockfile --manifest-path src-tauri/Cargo.toml` when depende
 It currently grants only `clipboard-manager:allow-write-text`, used by the copy button on the room
 screen. Add a permission only when the frontend genuinely needs it.
 
+Commands the application defines itself, `set_tray_status` and `notify_when_hidden` in
+`src-tauri/src/lib.rs`, are not part of that allow list; the Tauri access control list governs
+plugin commands. Prefer an application command that uses a plugin from Rust over granting the
+WebView the plugin permission, which is why notifications need no capability entry.
+
 ## Windows bundles
 
 Create the Windows installer bundles on Windows:

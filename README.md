@@ -36,6 +36,7 @@ Development releases are not currently Authenticode-signed, so Windows may displ
 - Public signaling and STUN path discovery with no router port forwarding
 - Multiple participants, peer list, Windows tray operation, and close-to-background hosting
 - Automatic reconnection after a dropped connection, without asking for the connection string again
+- Desktop notifications and a tray status while Ruyd is closed to the system tray
 - Hosting survives a temporary loss of the connection service; connected friends keep chatting
 - Same-LAN chat requires internet access for room signaling; offline-LAN rooms are not supported
 - No TURN relay fallback, so some network combinations still cannot connect at all
