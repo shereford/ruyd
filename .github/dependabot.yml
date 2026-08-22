@@ -7,14 +7,23 @@ updates:
     groups:
       tauri:
         patterns: ["@tauri-apps/*"]
+        update-types: ["major", "minor", "patch"]
+      build-tooling:
+        patterns: ["*"]
+        update-types: ["major", "minor", "patch"]
   - package-ecosystem: cargo
     directory: /src-tauri
     schedule:
       interval: weekly
     groups:
-      tauri:
-        patterns: ["tauri", "tauri-*"]
+      rust:
+        patterns: ["*"]
+        update-types: ["major", "minor", "patch"]
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+        update-types: ["major", "minor", "patch"]
