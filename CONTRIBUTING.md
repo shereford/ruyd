@@ -6,7 +6,7 @@ Thank you for helping make direct connectivity easier to use. Code, documentatio
 
 - Search existing issues and pull requests for related work.
 - Do not include connection strings, tokens, private IP addresses, logs containing personal data, or other credentials.
-- Report security vulnerabilities privately to the repository owner instead of opening a public exploit report.
+- Report security vulnerabilities privately through [SECURITY.md](SECURITY.md) instead of opening a public exploit report.
 - Describe current released behavior accurately. Ruyd 0.2 is direct chat, not a virtual LAN or traffic relay.
 
 ## Pull-request workflow

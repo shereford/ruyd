@@ -42,13 +42,15 @@ const connectivity = new DirectConnectivity({
     room = null;
     hosting = false;
     peers = [];
+    messages = [];
+    chatError = '';
     chatOpen = false;
     render();
   },
 });
 
 function shell(body: string) {
-  return `<main><header><div class="brand"><svg viewBox="0 0 32 32"><path d="M8 7.5h8.8a7.2 7.2 0 0 1 0 14.4H14l5.4 5.1h-5.8L5 18.6V7.5h3Zm3 5v5.4h5.5a2.7 2.7 0 0 0 0-5.4H11Z"/></svg><span>Ruyd</span></div><span>${room ? 'Direct' : 'Ready'}</span></header>${body}<footer><span class="shield">*</span> Ruyd v0.2.0 | Direct first | No traffic relay</footer></main>`;
+  return `<main><header><div class="brand"><svg viewBox="0 0 32 32"><path d="M8 7.5h8.8a7.2 7.2 0 0 1 0 14.4H14l5.4 5.1h-5.8L5 18.6V7.5h3Zm3 5v5.4h5.5a2.7 2.7 0 0 0 0-5.4H11Z"/></svg><span>Ruyd</span></div><span>${room ? 'Direct' : 'Ready'}</span></header>${body}<footer><span class="shield">*</span> Ruyd v${__RUYD_VERSION__} | Direct first | No traffic relay</footer></main>`;
 }
 
 function home() {
@@ -56,7 +58,7 @@ function home() {
 }
 
 function active() {
-  const count = hosting ? Math.max(0, peers.length - 1) : Math.max(0, peers.length - 1);
+  const count = Math.max(0, peers.length - 1);
   return shell(`<section class="hero active room-hero"><div class="status-orb"><i></i></div><p class="eyebrow">${hosting ? 'HOST ONLINE | WAITING FOR DIRECT CONNECTIONS' : 'ENCRYPTED DIRECT CONNECTION'}</p><h1>${hosting ? (peers.length > 1 ? 'Friends connected' : 'Waiting for friends') : `Connected to ${esc(room!.hostName || 'host')}`}</h1><p class="sub">${esc(room!.detail)}</p></section><section class="room"><label>CONNECTION STRING</label><div class="code long-code"><strong>${esc(room!.code.slice(0, 18))}...</strong><button id="copy">Copy</button></div><p>${esc(room!.endpoint)} | Only share with people you trust.</p></section><section class="peers"><div class="section-title"><h2>In this room</h2><span>${count} friends connected</span></div>${peers.map((peer) => {
     const isSelf = peer === name;
     const isHost = hosting ? isSelf : peer === room?.hostName;
@@ -172,17 +174,37 @@ function bind() {
     } else {
       messages.push({ name, text });
       chatError = '';
+      form.reset();
     }
     render();
   });
 }
 
+const chatInput = () => document.querySelector<HTMLInputElement>('#chat-form input[name="message"]');
+
 function render() {
+  const previous = chatInput();
+  const draft = previous && {
+    text: previous.value,
+    caret: previous.selectionStart ?? previous.value.length,
+    focused: document.activeElement === previous,
+  };
   app.innerHTML = room ? active() : home();
   bind();
   if (chatOpen) {
     const box = document.querySelector('.messages');
     if (box) box.scrollTop = box.scrollHeight;
+    const input = chatInput();
+    if (input) {
+      // `autofocus` does not fire for markup inserted after load, and replacing the
+      // tree would otherwise discard an unsent draft whenever a peer event arrives.
+      input.value = draft ? draft.text : '';
+      if (!draft || draft.focused) {
+        input.focus();
+        const caret = draft ? draft.caret : 0;
+        input.setSelectionRange(caret, caret);
+      }
+    }
   }
 }
 

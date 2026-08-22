@@ -25,6 +25,7 @@ Development releases are not currently Authenticode-signed, so Windows may displ
 | [Game guides](docs/games/README.md) | Community game-guide index, verification statuses, and guide contribution process |
 | [Development](docs/DEVELOPMENT.md) | Development requirements, local commands, alternate signaling configuration, and Windows builds |
 | [Contributing](CONTRIBUTING.md) | How to contribute code, documentation, testing reports, and game-specific guides |
+| [Security policy](SECURITY.md) | Supported versions, private vulnerability reporting, and known design limitations |
 | [Request a game guide](https://github.com/shereford/ruyd/issues/new?template=game-guide-request.yml) | Ask the community to research and document a LAN-capable game |
 
 **Game-guide contributors wanted:** Ruyd 0.2 does not carry game traffic yet, so current research must be labeled **Draft**. The first virtual-LAN release will need verified instructions for individual games, editions, and launchers. Start with the [game-guide template](docs/games/GUIDE_TEMPLATE.md).
