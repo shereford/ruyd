@@ -17,10 +17,29 @@ let chatError = '';
 let copyState: 'idle' | 'copied' | 'failed' = 'idle';
 let reconnecting: { attempt: number; attempts: number } | null = null;
 let signalingDegraded = false;
+let unread = 0;
 
 const esc = (value: string) => value.replace(/[&<>'"]/g, character => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
 }[character]!));
+
+/**
+ * Calls a command on the desktop shell. Every caller is an enhancement to a feature
+ * that already works in the WebView, so a missing shell is not an error.
+ */
+async function shellCommand(command: string, args: Record<string, unknown>): Promise<void> {
+  try {
+    const { invoke } = await import('@tauri-apps/api/core');
+    await invoke(command, args);
+  } catch {
+    // Running outside Tauri, or the command is unavailable.
+  }
+}
+
+/** Raised only while the window is hidden; the shell decides. */
+function alertWhenHidden(title: string, body: string): void {
+  void shellCommand('notify_when_hidden', { title, body });
+}
 
 async function copyConnectionString(text: string): Promise<boolean> {
   try {
@@ -44,7 +63,10 @@ function addPeer(peer: string) {
 
 const connectivity = new DirectConnectivity({
   onPeerJoined(peer) {
+    const isNew = peer !== name && !peers.includes(peer);
     addPeer(peer);
+    // A reconnect replays the whole peer list; that is not news.
+    if (isNew && !reconnecting) alertWhenHidden('Ruyd', `${peer} joined your room.`);
     render();
   },
   onPeerLeft(peer) {
@@ -53,6 +75,8 @@ const connectivity = new DirectConnectivity({
   },
   onChat(sender, text) {
     messages.push({ name: sender, text });
+    if (!chatOpen) unread += 1;
+    alertWhenHidden(`${sender} in your Ruyd room`, text);
     render();
   },
   onReconnecting(attempt, attempts) {
@@ -84,6 +108,7 @@ const connectivity = new DirectConnectivity({
     copyState = 'idle';
     reconnecting = null;
     signalingDegraded = false;
+    unread = 0;
     render();
   },
 });
@@ -112,7 +137,7 @@ function active() {
     const isSelf = peer === name;
     const isHost = hosting ? isSelf : peer === room?.hostName;
     return `<div class="peer"><span class="avatar">${esc(peer[0] || '?')}</span><p><b>${esc(peer)}${isSelf ? ' <small>(you)</small>' : ''}</b></p><em>${isHost ? 'Host' : 'Online'}</em></div>`;
-  }).join('')}<button class="chat-launch" id="chat">Open encrypted test chat</button><button class="stop" id="stop">${hosting ? 'Stop hosting' : 'Disconnect'}</button></section>${chatOpen ? chat() : ''}`);
+  }).join('')}<button class="chat-launch" id="chat">Open encrypted test chat${unread ? ` <span class="badge">${unread}</span>` : ''}</button><button class="stop" id="stop">${hosting ? 'Stop hosting' : 'Disconnect'}</button></section>${chatOpen ? chat() : ''}`);
 }
 
 function chat() {
@@ -153,6 +178,7 @@ async function startHost() {
     copyState = 'idle';
     reconnecting = null;
     signalingDegraded = false;
+    unread = 0;
   } catch (caught) {
     error = caught instanceof Error ? caught.message : String(caught);
   } finally {
@@ -181,6 +207,7 @@ function joinDialog() {
       copyState = 'idle';
       reconnecting = null;
       signalingDegraded = false;
+      unread = 0;
       addPeer(room.hostName || '');
     } catch (caught) {
       error = caught instanceof Error ? caught.message : String(caught);
@@ -214,10 +241,12 @@ function bind() {
     copyState = 'idle';
     reconnecting = null;
     signalingDegraded = false;
+    unread = 0;
     render();
   });
   document.querySelector('#chat')?.addEventListener('click', () => {
     chatOpen = true;
+    unread = 0;
     render();
   });
   const closeChat = () => {
@@ -245,6 +274,26 @@ function bind() {
   });
 }
 
+function trayStatus(): string {
+  if (reconnecting) return 'Ruyd - reconnecting';
+  if (!room) return 'Ruyd - ready';
+  const suffix = unread ? ` - ${unread} unread` : '';
+  if (hosting) {
+    const friends = Math.max(0, peers.length - 1);
+    return `Ruyd - hosting, ${friends} ${friends === 1 ? 'friend' : 'friends'} connected${suffix}`;
+  }
+  return `Ruyd - connected to ${room.hostName || 'host'}${suffix}`;
+}
+
+let lastTrayStatus = '';
+
+function syncTray(): void {
+  const status = trayStatus();
+  if (status === lastTrayStatus) return;
+  lastTrayStatus = status;
+  void shellCommand('set_tray_status', { status });
+}
+
 const chatInput = () => document.querySelector<HTMLInputElement>('#chat-form input[name="message"]');
 
 function render() {
@@ -256,6 +305,7 @@ function render() {
   };
   app.innerHTML = room ? active() : home();
   bind();
+  syncTray();
   if (chatOpen) {
     const box = document.querySelector('.messages');
     if (box) box.scrollTop = box.scrollHeight;
