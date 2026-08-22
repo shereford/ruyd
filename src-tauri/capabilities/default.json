@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Ruyd's main window may write the room connection string to the clipboard. No other command is permitted.",
+  "windows": ["main"],
+  "permissions": ["clipboard-manager:allow-write-text"]
+}

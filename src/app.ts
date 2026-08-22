@@ -14,10 +14,27 @@ let peers: string[] = [];
 let messages: Msg[] = [];
 let chatOpen = false;
 let chatError = '';
+let copyState: 'idle' | 'copied' | 'failed' = 'idle';
 
 const esc = (value: string) => value.replace(/[&<>'"]/g, character => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
 }[character]!));
+
+async function copyConnectionString(text: string): Promise<boolean> {
+  try {
+    const { writeText } = await import('@tauri-apps/plugin-clipboard-manager');
+    await writeText(text);
+    return true;
+  } catch {
+    // Running outside Tauri, or the clipboard command was unavailable.
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function addPeer(peer: string) {
   if (peer && !peers.includes(peer)) peers.push(peer);
@@ -45,6 +62,7 @@ const connectivity = new DirectConnectivity({
     messages = [];
     chatError = '';
     chatOpen = false;
+    copyState = 'idle';
     render();
   },
 });
@@ -59,7 +77,7 @@ function home() {
 
 function active() {
   const count = Math.max(0, peers.length - 1);
-  return shell(`<section class="hero active room-hero"><div class="status-orb"><i></i></div><p class="eyebrow">${hosting ? 'HOST ONLINE | WAITING FOR DIRECT CONNECTIONS' : 'ENCRYPTED DIRECT CONNECTION'}</p><h1>${hosting ? (peers.length > 1 ? 'Friends connected' : 'Waiting for friends') : `Connected to ${esc(room!.hostName || 'host')}`}</h1><p class="sub">${esc(room!.detail)}</p></section><section class="room"><label>CONNECTION STRING</label><div class="code long-code"><strong>${esc(room!.code.slice(0, 18))}...</strong><button id="copy">Copy</button></div><p>${esc(room!.endpoint)} | Only share with people you trust.</p></section><section class="peers"><div class="section-title"><h2>In this room</h2><span>${count} friends connected</span></div>${peers.map((peer) => {
+  return shell(`<section class="hero active room-hero"><div class="status-orb"><i></i></div><p class="eyebrow">${hosting ? 'HOST ONLINE | WAITING FOR DIRECT CONNECTIONS' : 'ENCRYPTED DIRECT CONNECTION'}</p><h1>${hosting ? (peers.length > 1 ? 'Friends connected' : 'Waiting for friends') : `Connected to ${esc(room!.hostName || 'host')}`}</h1><p class="sub">${esc(room!.detail)}</p></section><section class="room"><label>CONNECTION STRING</label><div class="code long-code"><strong>${esc(room!.code.slice(0, 18))}...</strong><button id="copy">${copyState === 'copied' ? 'Copied' : copyState === 'failed' ? 'Retry' : 'Copy'}</button></div>${copyState === 'failed' ? `<input class="code-fallback" id="code-fallback" readonly value="${esc(room!.code)}">` : ''}<p>${copyState === 'failed' ? 'Ruyd could not reach the clipboard. Select the full connection string above and copy it manually.' : `${esc(room!.endpoint)} | Only share with people you trust.`}</p></section><section class="peers"><div class="section-title"><h2>In this room</h2><span>${count} friends connected</span></div>${peers.map((peer) => {
     const isSelf = peer === name;
     const isHost = hosting ? isSelf : peer === room?.hostName;
     return `<div class="peer"><span class="avatar">${esc(peer[0] || '?')}</span><p><b>${esc(peer)}${isSelf ? ' <small>(you)</small>' : ''}</b></p><em>${isHost ? 'Host' : 'Online'}</em></div>`;
@@ -101,6 +119,7 @@ async function startHost() {
     room = await connectivity.host(name);
     hosting = true;
     peers = [name];
+    copyState = 'idle';
   } catch (caught) {
     error = caught instanceof Error ? caught.message : String(caught);
   } finally {
@@ -126,6 +145,7 @@ function joinDialog() {
     try {
       room = await connectivity.join(code, name);
       hosting = false;
+      copyState = 'idle';
       addPeer(room.hostName || '');
     } catch (caught) {
       error = caught instanceof Error ? caught.message : String(caught);
@@ -140,9 +160,14 @@ function joinDialog() {
 function bind() {
   document.querySelector('#host')?.addEventListener('click', () => nameDialog('host'));
   document.querySelector('#join')?.addEventListener('click', () => nameDialog('join'));
-  document.querySelector('#copy')?.addEventListener('click', async event => {
-    await navigator.clipboard.writeText(room?.code || '');
-    (event.currentTarget as HTMLElement).textContent = 'Copied';
+  document.querySelector('#copy')?.addEventListener('click', async () => {
+    copyState = (await copyConnectionString(room?.code || '')) ? 'copied' : 'failed';
+    render();
+    if (copyState === 'failed') {
+      const fallback = document.querySelector<HTMLInputElement>('#code-fallback');
+      fallback?.focus();
+      fallback?.select();
+    }
   });
   document.querySelector('#stop')?.addEventListener('click', async () => {
     await connectivity.stop();
@@ -151,6 +176,7 @@ function bind() {
     messages = [];
     chatError = '';
     peers = [];
+    copyState = 'idle';
     render();
   });
   document.querySelector('#chat')?.addEventListener('click', () => {

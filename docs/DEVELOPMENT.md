@@ -31,6 +31,19 @@ VITE_RUYD_SIGNALING_URL=https://example.invalid npm run build
 
 The public STUN server is configured separately in `src/connectivity.ts`.
 
+## Dependency pinning
+
+`package-lock.json` and `src-tauri/Cargo.lock` are both committed, and CI runs `cargo test` with
+`--locked`. A release therefore builds the same dependency graph that was reviewed, which is what
+the published build-provenance attestations are worth attesting to. Regenerate the Rust lockfile
+with `cargo generate-lockfile --manifest-path src-tauri/Cargo.toml` when dependencies change.
+
+## Tauri permissions
+
+`src-tauri/capabilities/default.json` is the allow list of Tauri commands the WebView may invoke.
+It currently grants only `clipboard-manager:allow-write-text`, used by the copy button on the room
+screen. Add a permission only when the frontend genuinely needs it.
+
 ## Windows bundles
 
 Create the Windows installer bundles on Windows:
