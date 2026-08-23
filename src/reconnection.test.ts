@@ -6,123 +6,26 @@ import {
   SignalingError,
   type ConnectionCallbacks,
 } from './connectivity';
+import { FakePeerConnection, jsonResponse, recorder, resetPeerConnections } from './webrtc-doubles';
 
 const CODE = createInvite('room_identifier_1234', 'invite_verifier_123456789012345678');
-
-class FakeDataChannel extends EventTarget {
-  readyState: RTCDataChannelState = 'connecting';
-  readonly sent: string[] = [];
-
-  send(data: string) {
-    this.sent.push(data);
-  }
-
-  close() {
-    if (this.readyState === 'closed') return;
-    this.readyState = 'closed';
-    this.dispatchEvent(new Event('close'));
-  }
-
-  open() {
-    this.readyState = 'open';
-    this.dispatchEvent(new Event('open'));
-  }
-
-  deliver(packet: unknown) {
-    const event = new Event('message') as Event & { data: string };
-    event.data = JSON.stringify(packet);
-    this.dispatchEvent(event);
-  }
-}
-
-/**
- * Enough of RTCPeerConnection for the client path. ICE gathering reports complete so
- * the connection is established as soon as the answer is applied, which is also when
- * the host's welcome packet arrives in the real protocol.
- */
-class FakePeerConnection extends EventTarget {
-  static instances: FakePeerConnection[] = [];
-  static welcome: unknown = { type: 'welcome', protocol: PROTOCOL_VERSION, hostName: 'Host', peers: ['Host'] };
-
-  connectionState: RTCPeerConnectionState = 'new';
-  iceGatheringState: RTCIceGatheringState = 'complete';
-  localDescription: RTCSessionDescription | null = null;
-  channel: FakeDataChannel | null = null;
-  closed = false;
-
-  constructor() {
-    super();
-    FakePeerConnection.instances.push(this);
-  }
-
-  createDataChannel() {
-    this.channel = new FakeDataChannel();
-    return this.channel as unknown as RTCDataChannel;
-  }
-
-  async createOffer() {
-    return { type: 'offer', sdp: 'v=0\r\n' } as RTCSessionDescriptionInit;
-  }
-
-  async setLocalDescription(description: RTCSessionDescriptionInit) {
-    this.localDescription = description as RTCSessionDescription;
-  }
-
-  async setRemoteDescription() {
-    queueMicrotask(() => {
-      if (this.closed) return;
-      this.connectionState = 'connected';
-      this.channel?.open();
-      this.channel?.deliver(FakePeerConnection.welcome);
-    });
-  }
-
-  close() {
-    this.closed = true;
-  }
-
-  fail() {
-    this.connectionState = 'failed';
-    this.dispatchEvent(new Event('connectionstatechange'));
-  }
-}
 
 const answer = { type: 'answer', sdp: 'v=0\r\n' };
 let joinStatus = 200;
 
 function fakeFetch(url: string) {
-  const ok = (body: unknown, status = 200) =>
-    Promise.resolve(new Response(JSON.stringify(body), {
-      status,
-      headers: { 'content-type': 'application/json' },
-    }));
   if (url.endsWith('/join')) {
     return joinStatus === 200
-      ? ok({ expiresAt: 1 })
-      : ok({ error: 'Connection code was rejected' }, joinStatus);
+      ? jsonResponse({ expiresAt: 1 })
+      : jsonResponse({ error: 'Connection code was rejected' }, joinStatus);
   }
-  if (url.endsWith('/peer/poll')) return ok({ answer });
-  return ok({});
-}
-
-function recorder() {
-  const events: string[] = [];
-  const callbacks: ConnectionCallbacks = {
-    onPeerJoined: (peer) => events.push(`joined:${peer}`),
-    onPeerLeft: (peer) => events.push(`left:${peer}`),
-    onChat: (peer, text) => events.push(`chat:${peer}:${text}`),
-    onReconnecting: (attempt, attempts) => events.push(`reconnecting:${attempt}/${attempts}`),
-    onReconnected: () => events.push('reconnected'),
-    onSignalingDegraded: (degraded) => events.push(`signaling:${degraded}`),
-    onDisconnected: (reason) => events.push(`disconnected:${reason}`),
-  };
-  return { events, callbacks };
+  if (url.endsWith('/peer/poll')) return jsonResponse({ answer });
+  return jsonResponse({});
 }
 
 beforeEach(() => {
   vi.useFakeTimers();
-  FakePeerConnection.instances = [];
-  FakePeerConnection.welcome = { type: 'welcome', protocol: PROTOCOL_VERSION, hostName: 'Host', peers: ['Host'] };
+  resetPeerConnections();
   joinStatus = 200;
   vi.stubGlobal('window', globalThis);
   vi.stubGlobal('RTCPeerConnection', FakePeerConnection);

@@ -5,6 +5,15 @@ and the data-channel protocol can change between minor versions.
 
 ## Unreleased
 
+### Fixed
+
+- **A friend who left stayed in everyone's peer list.** The host decided whether to
+  announce a departure by reading the data channel's `readyState`, but the `close` event
+  fires after the state is already `closed`, so the check never passed. Neither the host
+  nor the remaining peers were told that anyone had left, and the peer list only ever
+  grew. The host now tracks whether it announced the arrival and announces the departure
+  exactly when it did.
+
 ### Changed
 
 - The WebView runs under a Content Security Policy. It was previously disabled outright
