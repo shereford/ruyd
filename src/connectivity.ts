@@ -1,3 +1,5 @@
+import { Negotiator, type NegotiationSignal } from './negotiation';
+
 export const SIGNALING_URL = (import.meta.env.VITE_RUYD_SIGNALING_URL as string | undefined)?.replace(/\/$/, '') || 'https://connect.ruyd.us';
 export const ICE_CONFIGURATION: RTCConfiguration = {
   iceServers: [{ urls: ['stun:stun.ruyd.us:3478'] }],
@@ -14,8 +16,12 @@ const CONNECT_TIMEOUT_MS = 30_000;
  * packet. Together with INVITE_PREFIX this gates both directions of a version skew:
  * the prefix stops an older release from joining a newer room, and this version stops
  * a newer release from misreading an older room. Bump both when the format changes.
+ *
+ * 2 added `negotiate`, which carries renegotiation between two peers over their data
+ * channel. A release that cannot renegotiate would appear to connect and then silently
+ * never receive anything added to the connection later, so 1 and 2 do not interoperate.
  */
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 
 /** Highest number of peers a host will answer at once. */
 const MAX_PEERS = 16;
@@ -43,7 +49,9 @@ type Packet =
   | { type: 'welcome'; protocol?: number; hostName: string; peers: string[] }
   | { type: 'peer_joined'; name: string }
   | { type: 'peer_left'; name: string }
-  | { type: 'chat'; name: string; text: string };
+  | { type: 'chat'; name: string; text: string }
+  /** Renegotiation between this pair only. Never relayed to another peer. */
+  | { type: 'negotiate'; signal: NegotiationSignal };
 
 export type ConnectionCallbacks = {
   onPeerJoined(name: string): void;
@@ -70,6 +78,8 @@ type HostPeer = {
   name: string;
   connection: RTCPeerConnection;
   channel: RTCDataChannel | null;
+  /** Carries renegotiation with this peer once their channel is open. */
+  negotiator: Negotiator | null;
   /**
    * Whether this peer's arrival has been announced. A departure is announced only if an
    * arrival was, and exactly once. Reading the channel's `readyState` at removal time
@@ -231,6 +241,21 @@ function directFailure(): Error {
   return new Error('A direct tunnel could not be established between these networks. No port forwarding is required, but this network combination may require future relay access.');
 }
 
+function isNegotiationSignal(value: unknown): value is NegotiationSignal {
+  if (!value || typeof value !== 'object') return false;
+  const signal = value as Record<string, unknown>;
+  if ('description' in signal) {
+    const description = signal.description;
+    if (!description || typeof description !== 'object') return false;
+    const { type, sdp } = description as Record<string, unknown>;
+    return (type === 'offer' || type === 'answer') && typeof sdp === 'string' && sdp.length > 0;
+  }
+  if ('candidate' in signal) {
+    return signal.candidate === null || (typeof signal.candidate === 'object' && signal.candidate !== null);
+  }
+  return false;
+}
+
 /**
  * Validates a frame received from a peer. Everything crossing the data channel is
  * attacker-controlled, so an unrecognised or malformed frame is dropped rather than
@@ -248,6 +273,7 @@ export function parsePacket(value: unknown): Packet | null {
       && packet.peers.every((peer) => typeof peer === 'string')) return packet as Packet;
     if ((packet.type === 'peer_joined' || packet.type === 'peer_left') && typeof packet.name === 'string') return packet as Packet;
     if (packet.type === 'chat' && typeof packet.name === 'string' && typeof packet.text === 'string') return packet as Packet;
+    if (packet.type === 'negotiate' && isNegotiationSignal(packet.signal)) return packet as Packet;
     return null;
   } catch {
     return null;
@@ -270,6 +296,7 @@ export class DirectConnectivity {
   private answerAttempts = new Map<string, number>();
   private clientConnection: RTCPeerConnection | null = null;
   private clientChannel: RTCDataChannel | null = null;
+  private clientNegotiator: Negotiator | null = null;
   /** What a client needs to re-enter its room without asking the user for the code again. */
   private rejoin: { code: string; name: string } | null = null;
   private reconnecting = false;
@@ -325,6 +352,12 @@ export class DirectConnectivity {
     this.clientConnection = connection;
     const channel = connection.createDataChannel('ruyd-chat', { ordered: true });
     this.clientChannel = channel;
+    // A joining peer negotiates with the host alone, and yields when they collide.
+    this.clientNegotiator = new Negotiator({
+      connection,
+      polite: true,
+      send: (signal) => send(channel, { type: 'negotiate', signal }),
+    });
 
     let hostName = '';
     let welcomeError = '';
@@ -464,13 +497,16 @@ export class DirectConnectivity {
       void request(`/v1/rooms/${this.roomId}/close`, { hostToken: this.hostToken }).catch(() => undefined);
     }
     this.hostPeers.forEach((peer) => {
+      peer.negotiator?.close();
       peer.channel?.close();
       peer.connection.close();
     });
     this.hostPeers.clear();
     this.answerAttempts.clear();
+    this.clientNegotiator?.close();
     this.clientChannel?.close();
     this.clientConnection?.close();
+    this.clientNegotiator = null;
     this.clientChannel = null;
     this.clientConnection = null;
     this.abortController = null;
@@ -536,8 +572,16 @@ export class DirectConnectivity {
       name: disambiguate(peer.name, taken),
       connection,
       channel: null,
+      negotiator: null,
       announced: false,
     };
+    // The host negotiates with several peers at once, so it is the side that does not
+    // yield when two renegotiations collide.
+    hostPeer.negotiator = new Negotiator({
+      connection,
+      polite: false,
+      send: (signal) => send(hostPeer.channel, { type: 'negotiate', signal }),
+    });
     this.hostPeers.set(peer.peerId, hostPeer);
 
     connection.addEventListener('datachannel', (event) => {
@@ -571,6 +615,9 @@ export class DirectConnectivity {
         .filter((candidate) => candidate.channel?.readyState === 'open')
         .map((candidate) => candidate.name)];
       send(channel, { type: 'welcome', protocol: PROTOCOL_VERSION, hostName: this.name, peers: connectedPeers });
+      // Only now can renegotiation reach this peer, and only now is the initial
+      // offer and answer from the signaling service finished with.
+      peer.negotiator?.arm();
       peer.announced = true;
       this.callbacks.onPeerJoined(peer.name);
       this.hostPeers.forEach((candidate, id) => {
@@ -579,7 +626,13 @@ export class DirectConnectivity {
     });
     channel.addEventListener('message', (event) => {
       const packet = parsePacket(event.data);
-      if (packet?.type !== 'chat') return;
+      if (!packet) return;
+      if (packet.type === 'negotiate') {
+        // Point to point with this peer. Never relayed to anyone else.
+        void peer.negotiator?.accept(packet.signal);
+        return;
+      }
+      if (packet.type !== 'chat') return;
       const text = Array.from(packet.text.trim()).slice(0, 500).join('');
       if (!text) return;
       this.callbacks.onChat(peer.name, text);
@@ -605,6 +658,9 @@ export class DirectConnectivity {
           return;
         }
         packet.peers.forEach((peer) => this.callbacks.onPeerJoined(peer));
+        // The welcome is the first packet over an open channel, so the initial
+        // exchange through the signaling service is complete.
+        this.clientNegotiator?.arm();
         onWelcome(packet.hostName);
       } else if (packet.type === 'peer_joined') {
         this.callbacks.onPeerJoined(packet.name);
@@ -612,6 +668,8 @@ export class DirectConnectivity {
         this.callbacks.onPeerLeft(packet.name);
       } else if (packet.type === 'chat') {
         this.callbacks.onChat(packet.name, packet.text);
+      } else if (packet.type === 'negotiate') {
+        void this.clientNegotiator?.accept(packet.signal);
       }
     });
     channel.addEventListener('close', () => {
@@ -625,6 +683,7 @@ export class DirectConnectivity {
     const peer = this.hostPeers.get(peerId);
     if (!peer) return;
     this.hostPeers.delete(peerId);
+    peer.negotiator?.close();
     peer.channel?.close();
     peer.connection.close();
     if (peer.announced) {

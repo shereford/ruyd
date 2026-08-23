@@ -5,6 +5,21 @@ and the data-channel protocol can change between minor versions.
 
 ## Unreleased
 
+### Added
+
+- **Renegotiation over the data channel.** The signaling service exchanges exactly one
+  offer and one answer per peer, and a peer's record is write-once, so anything added to
+  a connection after it opens had nowhere to negotiate. Peers now carry their own
+  renegotiation once their data channel is open, which never touches a Ruyd server. This
+  is what a later audio track or tunnel transport needs in order to exist at all.
+
+### Changed
+
+- **The data-channel protocol is now version 2, and does not interoperate with 0.3.0.**
+  A release that cannot renegotiate would appear to connect normally and then silently
+  never receive anything added to the connection later, so both directions refuse the
+  connection with a message saying everyone needs the same release.
+
 ### Fixed
 
 - **A friend who left stayed in everyone's peer list.** The host decided whether to
