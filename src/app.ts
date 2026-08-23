@@ -1,5 +1,6 @@
 import './style.css';
 import { DirectConnectivity, type RoomInfo } from './connectivity';
+import { GameTunnel } from './tunnel';
 
 type Msg = { name: string; text: string };
 type NextAction = 'host' | 'join';
@@ -18,6 +19,10 @@ let copyState: 'idle' | 'copied' | 'failed' = 'idle';
 let reconnecting: { attempt: number; attempts: number } | null = null;
 let signalingDegraded = false;
 let unread = 0;
+let gameCopied = false;
+/** A game this host is offering, or the one a host offered us. One at a time for now. */
+let game: { forward: number; port: number; address?: string; error?: string } | null = null;
+let nextForward = 1;
 
 const esc = (value: string) => value.replace(/[&<>'"]/g, character => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
@@ -61,7 +66,27 @@ function addPeer(peer: string) {
   if (peer && !peers.includes(peer)) peers.push(peer);
 }
 
+let tunnel: GameTunnel;
+
 const connectivity = new DirectConnectivity({
+  onTunnelData(peer, data) {
+    tunnel.accept(peer, data);
+  },
+  async onGameShared(forward, port) {
+    // The host is offering a game. Bind the address this player types into it.
+    game = { forward, port };
+    render();
+    const address = await tunnel.open(0, forward, 0, port);
+    game = address
+      ? { forward, port, address }
+      : { forward, port, error: `Ruyd could not open port ${port} on this PC. Another program is probably already using it.` };
+    render();
+  },
+  onGameUnshared() {
+    game = null;
+    void tunnel.close(0);
+    render();
+  },
   onPeerJoined(peer) {
     const isNew = peer !== name && !peers.includes(peer);
     addPeer(peer);
@@ -109,6 +134,8 @@ const connectivity = new DirectConnectivity({
     reconnecting = null;
     signalingDegraded = false;
     unread = 0;
+    game = null;
+    void tunnel.stop();
     render();
   },
 });
@@ -119,6 +146,23 @@ function shell(body: string) {
 
 function home() {
   return shell(`<section class="hero"><div class="status-orb"><i></i></div><p class="eyebrow">READY WHEN YOU ARE</p><h1>Play together.\nLike you're in the same room.</h1><p class="sub">One friend hosts, the others connect, and Ruyd negotiates an encrypted direct path automatically.</p></section>${error ? `<p class="error-banner">${esc(error)}</p>` : ''}<section class="actions"><button class="primary" id="host" ${loading ? 'disabled' : ''}><span class="button-icon">+</span><span><b>${loading ? 'Starting host...' : 'Start hosting'}</b><small>Wait for friends—no router setup</small></span><em>&rarr;</em></button><button class="secondary" id="join" ${loading ? 'disabled' : ''}><span class="button-icon">&rarr;</span><span><b>${loading ? 'Connecting...' : 'Connect'}</b><small>Paste the host's connection string</small></span><em>&rarr;</em></button></section><section class="how"><h2>No accounts. No traffic relay.</h2><ol><li><span>1</span><p><b>Choose a display name</b><small>Only the name you enter is shared.</small></p></li><li><span>2</span><p><b>Host or connect</b><small>Ruyd handles NAT discovery automatically.</small></p></li><li><span>3</span><p><b>Chat directly</b><small>Messages do not pass through Ruyd servers.</small></p></li></ol></section>`);
+}
+
+function gameSection() {
+  if (hosting) {
+    if (!game) {
+      return `<section class="game"><div class="section-title"><h2>Play a game together</h2></div><p class="game-hint">Start your game's server or open it to LAN first, then share the port it uses. Your friends get an address to type into the game.</p><form id="share-form" class="game-form"><input name="port" type="number" min="1" max="65535" inputmode="numeric" placeholder="Game port, e.g. 25565" required><button class="primary compact">Share</button></form></section>`;
+    }
+    return `<section class="game"><div class="section-title"><h2>Play a game together</h2><span>Sharing</span></div><p class="game-hint">Friends can reach your game on port ${game.port}. Leave Ruyd running while you play.</p><button class="stop" id="unshare">Stop sharing port ${game.port}</button></section>`;
+  }
+  if (!game) return '';
+  if (game.error) {
+    return `<section class="game"><div class="section-title"><h2>Play a game together</h2></div><p class="notice">${esc(game.error)}</p></section>`;
+  }
+  if (!game.address) {
+    return `<section class="game"><div class="section-title"><h2>Play a game together</h2></div><p class="game-hint">Opening a local address for the host's game...</p></section>`;
+  }
+  return `<section class="game"><div class="section-title"><h2>Play a game together</h2><span>Ready</span></div><p class="game-hint">Type this into the game where it asks for a server address, then join as if it were on your own network.</p><div class="code"><strong class="game-address">${esc(game.address)}</strong><button id="copy-game">${gameCopied ? 'Copied' : 'Copy'}</button></div></section>`;
 }
 
 function notice() {
@@ -137,7 +181,7 @@ function active() {
     const isSelf = peer === name;
     const isHost = hosting ? isSelf : peer === room?.hostName;
     return `<div class="peer"><span class="avatar">${esc(peer[0] || '?')}</span><p><b>${esc(peer)}${isSelf ? ' <small>(you)</small>' : ''}</b></p><em>${isHost ? 'Host' : 'Online'}</em></div>`;
-  }).join('')}<button class="chat-launch" id="chat">Open encrypted test chat${unread ? ` <span class="badge">${unread}</span>` : ''}</button><button class="stop" id="stop">${hosting ? 'Stop hosting' : 'Disconnect'}</button></section>${chatOpen ? chat() : ''}`);
+  }).join('')}${gameSection()}<button class="chat-launch" id="chat">Open encrypted test chat${unread ? ` <span class="badge">${unread}</span>` : ''}</button><button class="stop" id="stop">${hosting ? 'Stop hosting' : 'Disconnect'}</button></section>${chatOpen ? chat() : ''}`);
 }
 
 function chat() {
@@ -179,6 +223,8 @@ async function startHost() {
     reconnecting = null;
     signalingDegraded = false;
     unread = 0;
+    game = null;
+    tunnel.start();
   } catch (caught) {
     error = caught instanceof Error ? caught.message : String(caught);
   } finally {
@@ -208,6 +254,8 @@ function joinDialog() {
       reconnecting = null;
       signalingDegraded = false;
       unread = 0;
+      game = null;
+      tunnel.start();
       addPeer(room.hostName || '');
     } catch (caught) {
       error = caught instanceof Error ? caught.message : String(caught);
@@ -242,6 +290,33 @@ function bind() {
     reconnecting = null;
     signalingDegraded = false;
     unread = 0;
+    game = null;
+    void tunnel.stop();
+    render();
+  });
+  document.querySelector('#share-form')?.addEventListener('submit', async event => {
+    event.preventDefault();
+    const form = event.currentTarget as HTMLFormElement;
+    const port = Number(new FormData(form).get('port'));
+    if (!Number.isInteger(port) || port < 1 || port > 65535) return;
+    const forward = nextForward++;
+    game = { forward, port };
+    render();
+    await tunnel.share(forward, port);
+    connectivity.shareGame(forward, port);
+    render();
+  });
+  document.querySelector('#unshare')?.addEventListener('click', async () => {
+    const forward = game?.forward;
+    game = null;
+    render();
+    if (forward !== undefined) {
+      connectivity.unshareGame(forward);
+      await tunnel.close(0, forward);
+    }
+  });
+  document.querySelector('#copy-game')?.addEventListener('click', async () => {
+    gameCopied = await copyConnectionString(game?.address || '');
     render();
   });
   document.querySelector('#chat')?.addEventListener('click', () => {
@@ -337,5 +412,7 @@ document.addEventListener('keydown', (event) => {
     render();
   }
 });
+
+tunnel = new GameTunnel(connectivity);
 
 render();

@@ -3051,12 +3051,14 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-clipboard-manager",
  "tauri-plugin-notification",
+ "tokio",
 ]
 
 [[package]]
 name = "ruyd-tunnel"
 version = "0.3.0"
 dependencies = [
+ "serde",
  "tokio",
 ]
 

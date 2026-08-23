@@ -7,6 +7,7 @@ publish = false
 
 [dependencies]
 tokio = { version = "1", features = ["net", "rt", "sync", "macros", "io-util", "time"] }
+serde = { version = "1", features = ["derive"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["net", "rt-multi-thread", "sync", "macros", "io-util", "time", "test-util"] }

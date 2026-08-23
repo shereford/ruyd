@@ -48,6 +48,22 @@ Both ends of a pair can need to renegotiate at the same moment, and the collisio
 
 Renegotiation stays inert until the data channel opens. Before that the initial offer and answer are still in flight through the signaling service, and answering the same events twice would run two negotiations for one connection.
 
+## Carrying a game
+
+A host offers the port its game listens on, and every other peer binds a matching local
+address on loopback for their own game to connect to. Frames pass over two data channels
+opened alongside the chat channel when a peer joins: datagrams on an unordered, unreliable
+one, stream frames on a reliable one.
+
+The privilege boundary is the point. Nothing installs an adapter, adds a route, or touches
+a firewall rule. The listening side binds a loopback address, which needs no administrator
+rights, and the connecting side only ever opens sockets to `127.0.0.1` and cannot be asked
+to reach anything else, so a room is not a way into the host's network. A peer that offers a
+port nobody shared is ignored rather than obeyed.
+
+[Carrying game traffic](LAN_TRANSPORT.md) has the full design, including why the frames
+cross to the desktop shell the way they do.
+
 ## Display names
 
 Names are how the data-channel protocol identifies people: peer lists, join and leave notices, and message attribution all carry a name and nothing else. Two friends who chose the same name would therefore collapse into one entry, and one of them leaving would remove both.

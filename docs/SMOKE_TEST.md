@@ -55,6 +55,25 @@ without a second machine, but it does **not** exercise NAT traversal.
       as `Name (2)`, and both are listed separately.
 - [ ] **Stop hosting** on the host. The joined window reports the room ended rather than hanging.
 
+## Playing a game, on two Ruyd windows or two PCs
+
+Run after any change to the tunnel. The two-window arrangement above is enough for
+everything except confirming it works across real networks.
+
+- [ ] The host enters a port and chooses **Share**. It reports that it is sharing.
+- [ ] The joining side is given an address of the form `127.71.0.2:<port>`, and **Copy**
+      reports `Copied`.
+- [ ] Start something listening on that port on the host — a real game server is best, but
+      any listener proves the path — connect to the address from the joining side, and
+      traffic reaches it and comes back.
+- [ ] A port that is already in use on the joining side reports that plainly rather than
+      failing silently.
+- [ ] **Stop sharing** removes the address from the joining side.
+- [ ] Leaving the room releases the bound port: sharing again immediately afterwards works
+      rather than reporting the port as busy.
+- [ ] Ruyd changed nothing else. Ordinary browsing, Discord, and other applications are
+      unaffected, and `ipconfig` shows no new adapter.
+
 ## Tier 3 — two PCs on separate networks
 
 The only tier that exercises what Ruyd is actually for. Run it before a release that changed

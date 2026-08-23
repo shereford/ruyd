@@ -45,6 +45,25 @@ Ruyd still requires internet access to create and join the room through `connect
 
 This is not virtual-LAN support. Ruyd transports only its own chat messages; it does not transport another application's TCP or UDP packets, forward game discovery broadcasts, assign a Ruyd IP address, or make a remote friend visible in a game's LAN browser.
 
+## Play a game together
+
+Ruyd can carry a game's traffic between you and your friends. Right now it works with games
+that let you join by typing in a server address; it cannot yet make your PC show up in a
+game's LAN browser.
+
+**If you are hosting the game**, start its server or open it to LAN first, then in Ruyd
+enter the port the game uses and choose **Share**. Leave Ruyd running while you play.
+
+**If you are joining**, Ruyd shows an address like `127.71.0.2:25565` once the host shares
+their game. Type that into the game where it asks for a server address and join as normal.
+
+Only the person hosting the Ruyd room can share a game. If Ruyd cannot open the port, some
+other program on your PC is already using it; close that program and reconnect.
+
+This is not the same as a virtual LAN. Ruyd carries traffic for the port that was shared and
+nothing else. It does not create a network adapter, change your routing, alter firewall
+rules, or affect any other program's traffic.
+
 ## Privacy and network behavior
 
 - Chat messages travel over encrypted WebRTC data channels between Ruyd peers.

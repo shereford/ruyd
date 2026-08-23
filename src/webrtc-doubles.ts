@@ -53,8 +53,10 @@ export class FakePeerConnection extends EventTarget {
   iceGatheringState: RTCIceGatheringState = 'complete';
   localDescription: RTCSessionDescription | null = null;
   remoteDescription: RTCSessionDescriptionInit | null = null;
-  /** The channel this side created. Only a joining client creates one. */
+  /** The chat channel this side created. Only a joining client creates one. */
   channel: FakeDataChannel | null = null;
+  /** Every channel this side created, by label. A client opens chat and two tunnels. */
+  readonly channels = new Map<string, FakeDataChannel>();
   closed = false;
 
   constructor() {
@@ -62,9 +64,12 @@ export class FakePeerConnection extends EventTarget {
     FakePeerConnection.instances.push(this);
   }
 
-  createDataChannel() {
-    this.channel = new FakeDataChannel();
-    return this.channel as unknown as RTCDataChannel;
+  createDataChannel(label: string) {
+    const channel = new FakeDataChannel();
+    this.channels.set(label, channel);
+    // The welcome arrives on the chat channel; the tunnel channels carry no protocol.
+    if (label === 'ruyd-chat') this.channel = channel;
+    return channel as unknown as RTCDataChannel;
   }
 
   async createOffer() {
@@ -82,13 +87,13 @@ export class FakePeerConnection extends EventTarget {
 
   async setRemoteDescription(description: RTCSessionDescriptionInit) {
     this.remoteDescription = description;
-    // Only the joining client created a channel; its connection completes here. A host
-    // is applying an offer and still has to wait for the peer's channel to arrive.
+    // Only the joining client created channels; its connection completes here. A host is
+    // applying an offer and still has to wait for the peer's channels to arrive.
     if (!this.channel) return;
     queueMicrotask(() => {
       if (this.closed) return;
       this.connectionState = 'connected';
-      this.channel?.open();
+      for (const channel of this.channels.values()) channel.open();
       this.channel?.deliver(FakePeerConnection.welcome);
     });
   }
@@ -104,8 +109,9 @@ export class FakePeerConnection extends EventTarget {
   }
 
   /** Simulates a joining peer opening its channel to a host. */
-  receiveChannel(): FakeDataChannel {
+  receiveChannel(label = 'ruyd-chat'): FakeDataChannel {
     const channel = new FakeDataChannel();
+    Object.defineProperty(channel, 'label', { value: label });
     const event = new Event('datachannel') as Event & { channel: FakeDataChannel };
     event.channel = channel;
     this.dispatchEvent(event);
@@ -134,6 +140,9 @@ export function recorder() {
     onReconnecting: (attempt, attempts) => events.push(`reconnecting:${attempt}/${attempts}`),
     onReconnected: () => events.push('reconnected'),
     onSignalingDegraded: (degraded) => events.push(`signaling:${degraded}`),
+    onTunnelData: (peer) => events.push(`tunnel:${peer}`),
+    onGameShared: (forward, port) => events.push(`share:${forward}:${port}`),
+    onGameUnshared: (forward) => events.push(`unshare:${forward}`),
     onDisconnected: (reason) => events.push(`disconnected:${reason}`),
   };
   return { events, callbacks };
