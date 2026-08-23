@@ -1,3 +1,6 @@
+[workspace]
+members = ["tunnel"]
+
 [package]
 name = "ruyd"
 version = "0.3.0"
@@ -13,3 +16,4 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-notification = "2"
+ruyd-tunnel = { path = "tunnel" }

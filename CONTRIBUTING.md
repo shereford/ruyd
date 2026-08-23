@@ -24,7 +24,7 @@ For application changes, run:
 npm ci
 npm test
 npm run build
-cargo test --manifest-path src-tauri/Cargo.toml --locked
+cargo test --manifest-path src-tauri/Cargo.toml --locked --workspace
 ```
 
 Windows packaging changes should also be checked with `npm run tauri build` on Windows.

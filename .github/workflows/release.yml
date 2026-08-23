@@ -27,7 +27,7 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
-      - run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --locked --workspace
       - run: npm run tauri build
       - name: Collect installers and checksums
         shell: pwsh
