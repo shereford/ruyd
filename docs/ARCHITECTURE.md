@@ -90,3 +90,5 @@ Because no relay is configured, some combinations of symmetric NAT, carrier-grad
 ## Future virtual-LAN boundary
 
 The present application is chat only. A future game-networking implementation should add a separately privileged networking service that owns a virtual adapter, per-room keys, narrow routes, firewall cleanup, and allow-listed discovery forwarding. It must never install or replace a default route. Voice should remain a separate media transport so failures or policy changes do not affect game routing.
+
+[Carrying game traffic](LAN_TRANSPORT.md) works this out in full: what LAN play decomposes into, which parts need a driver and which do not, and the architecture decision that has to be settled before any of it is written.

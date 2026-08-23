@@ -22,6 +22,7 @@ Development releases are not currently Authenticode-signed, so Windows may displ
 | --- | --- |
 | [User guide](docs/USER_GUIDE.md) | Installation, hosting, connecting, tray behavior, same-LAN use, privacy, and troubleshooting |
 | [Architecture](docs/ARCHITECTURE.md) | Signaling, STUN, WebRTC, security boundaries, availability, and the future virtual-LAN design |
+| [Carrying game traffic](docs/LAN_TRANSPORT.md) | The plan for LAN play over the internet, and the decisions it still needs |
 | [Game guides](docs/games/README.md) | Community game-guide index, verification statuses, and guide contribution process |
 | [Development](docs/DEVELOPMENT.md) | Development requirements, local commands, alternate signaling configuration, and Windows builds |
 | [Smoke test](docs/SMOKE_TEST.md) | The manual pass on Windows that CI cannot do, run before every release |
