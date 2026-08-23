@@ -44,6 +44,10 @@ Names are how the data-channel protocol identifies people: peer lists, join and 
 
 The host resolves this before it announces anyone. A joining peer whose name is already in the room is given a numbered one, `Sam (2)`, kept within the 24-character limit by trimming the original by code point rather than UTF-16 unit. Clients receive names that are already unique, so this needs no protocol change and older releases see it as an ordinary name.
 
+## Joining and leaving
+
+The host announces an arrival when a peer's data channel opens, and a departure when that peer's channel or connection closes, exactly once each and only for peers whose arrival it announced. It tracks that explicitly rather than inspecting the channel state at removal time: a data channel's `close` event fires once `readyState` is already `closed`, so a check made at that point can never observe the channel as open.
+
 ## Host limits
 
 A host answers at most 16 peers at once and makes at most three attempts to answer any one peer's offer. Peers whose offers cannot be answered are then treated as unreachable for the life of the room, so an unusable offer cannot make the host rebuild a peer connection on every poll. The signaling service returns at most 32 peer records per room.

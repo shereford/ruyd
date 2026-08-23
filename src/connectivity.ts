@@ -70,6 +70,12 @@ type HostPeer = {
   name: string;
   connection: RTCPeerConnection;
   channel: RTCDataChannel | null;
+  /**
+   * Whether this peer's arrival has been announced. A departure is announced only if an
+   * arrival was, and exactly once. Reading the channel's `readyState` at removal time
+   * cannot answer this: the `close` event fires after the state is already `closed`.
+   */
+  announced: boolean;
 };
 
 const textEncoder = new TextEncoder();
@@ -526,7 +532,12 @@ export class DirectConnectivity {
   private async answerPeer(peer: SignalPeer, signal: AbortSignal): Promise<void> {
     const connection = new RTCPeerConnection(ICE_CONFIGURATION);
     const taken = [this.name, ...Array.from(this.hostPeers.values(), (candidate) => candidate.name)];
-    const hostPeer: HostPeer = { name: disambiguate(peer.name, taken), connection, channel: null };
+    const hostPeer: HostPeer = {
+      name: disambiguate(peer.name, taken),
+      connection,
+      channel: null,
+      announced: false,
+    };
     this.hostPeers.set(peer.peerId, hostPeer);
 
     connection.addEventListener('datachannel', (event) => {
@@ -560,6 +571,7 @@ export class DirectConnectivity {
         .filter((candidate) => candidate.channel?.readyState === 'open')
         .map((candidate) => candidate.name)];
       send(channel, { type: 'welcome', protocol: PROTOCOL_VERSION, hostName: this.name, peers: connectedPeers });
+      peer.announced = true;
       this.callbacks.onPeerJoined(peer.name);
       this.hostPeers.forEach((candidate, id) => {
         if (id !== peerId) send(candidate.channel, { type: 'peer_joined', name: peer.name });
@@ -612,11 +624,10 @@ export class DirectConnectivity {
   private removeHostPeer(peerId: string): void {
     const peer = this.hostPeers.get(peerId);
     if (!peer) return;
-    const wasOpen = peer.channel?.readyState === 'open';
     this.hostPeers.delete(peerId);
     peer.channel?.close();
     peer.connection.close();
-    if (wasOpen) {
+    if (peer.announced) {
       this.callbacks.onPeerLeft(peer.name);
       this.hostPeers.forEach((candidate) => send(candidate.channel, { type: 'peer_left', name: peer.name }));
     }
