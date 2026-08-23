@@ -17,3 +17,4 @@ tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-notification = "2"
 ruyd-tunnel = { path = "tunnel" }
+tokio = { version = "1", features = ["sync", "time"] }
