@@ -38,6 +38,16 @@ Two independent checks stop releases that speak different formats from half-conn
 
 Bump both when the packet format changes. Neither check can protect an already-released binary from a format it has never seen, which is why the prefix exists as the coarse gate.
 
+## Renegotiation
+
+The signaling service exchanges one offer and one answer per peer, and a peer's record is write-once. That is enough to open a connection and nothing more. Anything added to a connection afterwards — an audio track, a second data channel for a tunnel — needs a negotiation the service cannot carry.
+
+Once a peer's data channel is open, the peers carry their own. A `negotiate` packet holds either a session description or an ICE candidate, and travels only between that pair; the host never relays one to another peer. This is strictly better than extending the service: renegotiation never touches a Ruyd server, and the traffic is already inside the encrypted data channel.
+
+Both ends of a pair can need to renegotiate at the same moment, and the collision cannot be settled by a round trip. Ruyd uses the WebRTC perfect-negotiation pattern: one side is designated polite and yields, the other ignores the clash and proceeds. **The host is impolite**, because it negotiates with every peer at once and should not be the side that rolls back. A joining client is polite.
+
+Renegotiation stays inert until the data channel opens. Before that the initial offer and answer are still in flight through the signaling service, and answering the same events twice would run two negotiations for one connection.
+
 ## Display names
 
 Names are how the data-channel protocol identifies people: peer lists, join and leave notices, and message attribution all carry a name and nothing else. Two friends who chose the same name would therefore collapse into one entry, and one of them leaving would remove both.
