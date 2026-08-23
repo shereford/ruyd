@@ -24,6 +24,7 @@ Development releases are not currently Authenticode-signed, so Windows may displ
 | [Architecture](docs/ARCHITECTURE.md) | Signaling, STUN, WebRTC, security boundaries, availability, and the future virtual-LAN design |
 | [Game guides](docs/games/README.md) | Community game-guide index, verification statuses, and guide contribution process |
 | [Development](docs/DEVELOPMENT.md) | Development requirements, local commands, alternate signaling configuration, and Windows builds |
+| [Smoke test](docs/SMOKE_TEST.md) | The manual pass on Windows that CI cannot do, run before every release |
 | [Contributing](CONTRIBUTING.md) | How to contribute code, documentation, testing reports, and game-specific guides |
 | [Security policy](SECURITY.md) | Supported versions, private vulnerability reporting, and known design limitations |
 | [Changelog](CHANGELOG.md) | What changed in each release |

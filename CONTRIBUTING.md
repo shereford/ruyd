@@ -29,6 +29,10 @@ cargo test --manifest-path src-tauri/Cargo.toml --locked
 
 Windows packaging changes should also be checked with `npm run tauri build` on Windows.
 
+Changes to `src-tauri/`, `tauri.conf.json`, or `src-tauri/capabilities/` are not covered by any
+automated check beyond compiling. Work through tier 1 of [the smoke test](docs/SMOKE_TEST.md) and
+say in the pull request what you ran.
+
 ## Contributing a game guide
 
 Ruyd will need community-tested instructions because games differ in LAN discovery, direct-IP support, ports, launchers, editions, and host setup.

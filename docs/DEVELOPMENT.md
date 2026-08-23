@@ -50,8 +50,9 @@ If a change needs a new origin, add it to the narrowest directive that works rat
 CSP to `RTCPeerConnection` ICE servers, so it has no effect today, but it costs nothing and every
 Ruyd connection would fail if that ever changed.
 
-A CSP mistake surfaces only at runtime, and nothing in CI runs the packaged application. Install
-the build and exercise hosting, joining, and chat after changing either policy.
+A CSP mistake surfaces only at runtime, and nothing in CI runs the packaged application. Work
+through [the smoke test](SMOKE_TEST.md) after changing either policy; tier 1 is enough to catch a
+policy that blocks signaling.
 
 ## Tauri permissions
 
@@ -99,9 +100,9 @@ The workflow tests, builds, packages the `.exe` and `.msi`, writes `SHA256SUMS.t
 assets, and publishes the GitHub release with notes taken from the changelog. Verify the published
 assets with `gh release verify` before announcing the release.
 
-Nothing in the pipeline runs the packaged application. Install the built `.exe` on Windows and
-exercise hosting, joining, the copy button, close-to-tray, and notifications before announcing a
-release that changed the desktop shell.
+Nothing in the pipeline runs the packaged application. Work through
+[the smoke test](SMOKE_TEST.md) on Windows before announcing a release, and record which tiers
+were run.
 
 ## Before opening a pull request
 
