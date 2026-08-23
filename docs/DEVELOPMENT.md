@@ -38,6 +38,20 @@ The public STUN server is configured separately in `src/connectivity.ts`.
 the published build-provenance attestations are worth attesting to. Regenerate the Rust lockfile
 with `cargo generate-lockfile --manifest-path src-tauri/Cargo.toml` when dependencies change.
 
+## The tunnel crate
+
+`src-tauri/tunnel` carries a game's traffic between two peers. It depends only on `tokio` —
+no Tauri, no platform API — so it builds and tests anywhere:
+
+```bash
+cargo test --manifest-path src-tauri/Cargo.toml -p ruyd-tunnel
+```
+
+Those tests run the whole data path over real sockets: a fake game, a fake game client, and
+a listener wired to a connector. Only the transport between them is stood in for. CI runs
+them on Linux in a separate job specifically so that staying platform-independent is
+enforced rather than hoped for. Do not add a dependency to that crate that breaks it.
+
 ## Content Security Policy
 
 `app.security.csp` in `src-tauri/tauri.conf.json` applies to packaged builds and

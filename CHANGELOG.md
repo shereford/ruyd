@@ -7,6 +7,13 @@ and the data-channel protocol can change between minor versions.
 
 ### Added
 
+- **The transport for LAN play over the internet**, as a standalone `ruyd-tunnel` crate.
+  One side binds the address a player types into their game's *Join by IP* box, the other
+  opens sockets to the game that is running, and frames pass between them. It needs no
+  driver, no administrator rights, and no code-signing certificate: the listener binds a
+  loopback address and the connector only ever talks to `127.0.0.1`. Not yet wired to the
+  interface or to a data channel. See [the plan](docs/LAN_TRANSPORT.md).
+
 - **Renegotiation over the data channel.** The signaling service exchanges exactly one
   offer and one answer per peer, and a peer's record is write-once, so anything added to
   a connection after it opens had nowhere to negotiate. Peers now carry their own

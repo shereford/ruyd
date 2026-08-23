@@ -7,6 +7,17 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  tunnel:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      # ruyd-tunnel depends only on tokio, so it builds and tests anywhere. Keeping that
+      # true is the point of this job: the tunnel must not acquire a platform dependency.
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --locked -p ruyd-tunnel
   windows:
     runs-on: windows-latest
     steps:
@@ -20,7 +31,7 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
-      - run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --locked --workspace
       - run: npm run tauri build
       - uses: actions/upload-artifact@v7
         with:

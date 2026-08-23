@@ -5,7 +5,10 @@ to play on a local one. Nothing shipped so far does that: 0.3.0 carries its own 
 says so everywhere. This document is the plan for the part that does, and the decisions
 that have to be made before any of it is written.
 
-Nothing here is implemented.
+Stage 1's transport is built and tested: `src-tauri/tunnel` is a standalone crate with no
+Tauri or platform dependency, so the whole data path runs over real sockets in CI on Linux.
+Nothing is wired to the interface or to a data channel yet, and stages 2 and 3 are still
+only a plan.
 
 ## What "LAN over the internet" actually decomposes into
 
@@ -39,13 +42,18 @@ types a local address into the game's *Join by IP* box and the game is none the 
   renegotiation over the data channel. That is why it was built first.
 
 **Presenting each peer as a distinct address.** Games frequently hardcode their port, and
-the player may be running the same game locally. Binding each remote peer to its own
-loopback address — `127.71.0.2`, `127.71.0.3` — keeps the port identical and sidesteps the
-collision entirely. **This needs verifying before it is designed in:** on Windows,
-addresses in `127.0.0.0/8` other than `127.0.0.1` have historically needed to be added to
-the loopback pseudo-interface, which requires administrator rights and would forfeit the
-whole point of this stage. The fallback that certainly works is one distinct port per peer
-on `127.0.0.1`, which most *Join by IP* boxes accept as `address:port`.
+the player may be running the same game locally. Each remote peer gets its own loopback
+address — `127.71.0.2`, `127.71.0.3` — so the port stays exactly what the game expects and
+several peers can share one without colliding.
+
+This was confirmed on Windows before being designed in: binding and connecting to
+`127.71.0.2` succeeds from an unelevated process, so no administrator rights are needed and
+the fallback of one port per peer is not required. `127.71.0.0` and `127.71.0.1` are
+skipped, the first being a network address and the second the real loopback the game is
+probably already using.
+
+Both UDP and TCP are bound on that address. Which one a game uses is not knowable in
+advance, and binding only one produces a failure a player cannot diagnose.
 
 What stage 1 cannot do: appear in a LAN browser. The player has to be told an address.
 

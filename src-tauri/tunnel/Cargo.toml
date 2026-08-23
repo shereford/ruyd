@@ -1,0 +1,12 @@
+[package]
+name = "ruyd-tunnel"
+version = "0.3.0"
+description = "Carries a game's traffic between two Ruyd peers"
+edition = "2021"
+publish = false
+
+[dependencies]
+tokio = { version = "1", features = ["net", "rt", "sync", "macros", "io-util", "time"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["net", "rt-multi-thread", "sync", "macros", "io-util", "time", "test-util"] }
