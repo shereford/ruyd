@@ -7,6 +7,8 @@ use tauri::{
 };
 use tauri_plugin_notification::NotificationExt;
 
+mod tunnel;
+
 const TRAY_ID: &str = "ruyd";
 
 /// Closing the window hides Ruyd instead of quitting, which is not what the close button
@@ -42,7 +44,18 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_notification::init())
-        .invoke_handler(tauri::generate_handler![set_tray_status, notify_when_hidden])
+        .manage(tunnel::Tunnel::new())
+        .invoke_handler(tauri::generate_handler![
+            set_tray_status,
+            notify_when_hidden,
+            tunnel::tunnel_open,
+            tunnel::tunnel_share,
+            tunnel::tunnel_close,
+            tunnel::tunnel_reset,
+            tunnel::tunnel_send,
+            tunnel::tunnel_drain,
+            tunnel::tunnel_metrics
+        ])
         .setup(|app| {
             let show = MenuItem::with_id(app, "show", "Open Ruyd", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit Ruyd", true, None::<&str>)?;

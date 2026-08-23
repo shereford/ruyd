@@ -155,6 +155,35 @@ describe('hosting a room', () => {
   });
 });
 
+describe('offering a game', () => {
+  it('tells the peers that are here and the ones that arrive later', async () => {
+    const { callbacks } = recorder();
+    const { connectivity } = await hosting(callbacks);
+    const early = await joinPeer('peer_identifier_01', 'Bo');
+
+    connectivity.shareGame(4, 25565);
+    expect(early.sent).toContainEqual({ type: 'share', forward: 4, port: 25565 });
+
+    // Someone who joins after the game was offered still needs to hear about it.
+    const late = await joinPeer('peer_identifier_02', 'Cy');
+    expect(late.sent).toContainEqual({ type: 'share', forward: 4, port: 25565 });
+  });
+
+  it('withdraws the offer from everyone', async () => {
+    const { callbacks } = recorder();
+    const { connectivity } = await hosting(callbacks);
+    const peer = await joinPeer('peer_identifier_01', 'Bo');
+
+    connectivity.shareGame(4, 25565);
+    connectivity.unshareGame(4);
+    expect(peer.sent).toContainEqual({ type: 'unshare', forward: 4 });
+
+    // And a peer arriving after the withdrawal is not told about a game that is gone.
+    const later = await joinPeer('peer_identifier_02', 'Cy');
+    expect(later.sent.some((packet) => packet.type === 'share')).toBe(false);
+  });
+});
+
 describe('relaying chat', () => {
   it('fans a peer message out to the others without echoing it back', async () => {
     const { events, callbacks } = recorder();

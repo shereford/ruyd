@@ -5,10 +5,9 @@ to play on a local one. Nothing shipped so far does that: 0.3.0 carries its own 
 says so everywhere. This document is the plan for the part that does, and the decisions
 that have to be made before any of it is written.
 
-Stage 1's transport is built and tested: `src-tauri/tunnel` is a standalone crate with no
-Tauri or platform dependency, so the whole data path runs over real sockets in CI on Linux.
-Nothing is wired to the interface or to a data channel yet, and stages 2 and 3 are still
-only a plan.
+Stage 1 is built. `src-tauri/tunnel` carries the traffic, `src-tauri/src/tunnel.rs` bridges
+it to the WebView, and the room screen offers a game and hands out the address to type into
+it. Stages 2 and 3 are still only a plan.
 
 ## What "LAN over the internet" actually decomposes into
 
@@ -32,14 +31,19 @@ Ruyd opens a local listener on the joining player's PC and forwards whatever arr
 the far peer's loopback, where a matching connector delivers it to the game. The player
 types a local address into the game's *Join by IP* box and the game is none the wiser.
 
-- Control travels on the existing reliable data channel: a request to open a forward, and
-  the port that was actually bound.
-- Payload travels on a **second data channel configured unordered and unreliable**
+- Control travels on the existing reliable data channel: the host offers a port, and
+  withdraws it.
+- Datagrams travel on a **channel configured unordered and unreliable**
   (`{ ordered: false, maxRetransmits: 0 }`). Game traffic is overwhelmingly UDP, and
-  putting it on the reliable channel would add head-of-line blocking to exactly the
-  packets that must not wait. TCP forwards keep the reliable channel.
-- Opening that second channel on a live connection is only possible because of
-  renegotiation over the data channel. That is why it was built first.
+  putting it on a reliable channel would add head-of-line blocking to exactly the packets
+  that must not wait. Stream frames keep a reliable channel, because a stream that loses a
+  chunk is broken rather than degraded.
+- All three channels are opened when a peer joins rather than when a game is first
+  offered. A channel added to a live connection would need renegotiating, and a channel
+  nobody uses costs a line of SDP. Renegotiation is still what voice will need.
+- **Only the room host can offer a game.** A client's traffic would have to be relayed by
+  the host to reach the other clients, and this stage carries packets between two peers
+  and no further.
 
 **Presenting each peer as a distinct address.** Games frequently hardcode their port, and
 the player may be running the same game locally. Each remote peer gets its own loopback
@@ -131,11 +135,24 @@ peer connection for the tunnel, signalled over the existing data channel. The ho
 in Rust and nothing is rewritten. The cost is a second ICE negotiation and a second DTLS
 handshake per pair, and a confusing failure mode where one connects and the other does not.
 
-**Recommendation: build stage 1 on A, and instrument it.** It is the only option that
-proves the product idea without committing to an architecture, and A → C is a smaller move
-later than B is now. Decide against a number, not a hunch: measure round-trip latency added
-by the IPC hop and sustained packet rate per peer, and move if either is worse than a game
-can tolerate.
+**Built on A, instrumented.** It is the only option that proves the product idea without
+committing to an architecture, and A → C is a smaller move later than B is now.
+
+Reading Tauri's IPC before writing to it changed how A is built, and the finding is worth
+recording. `Channel`, the obvious way to push bytes to a WebView, serialises a payload
+under 1024 bytes into a **JSON array of numbers and injects it as JavaScript source** for
+the engine to parse; above that threshold it performs a whole extra `invoke` round trip. A
+game packet lands either side of that line depending on the moment. Neither is something to
+do thousands of times a second, so neither direction uses `Channel`:
+
+- **To the shell**, `tunnel_send` takes a raw request body, which is already bytes.
+- **From the shell**, `tunnel_drain` is held open until there is a frame and answers with a
+  raw response body. The WebView keeps exactly one call outstanding and reissues it.
+- Both directions coalesce. While a send is in flight everything else accumulates, so a
+  burst costs one crossing rather than one per packet, and an idle tunnel adds no delay.
+
+The counters in the tunnel crate are what the stage 2 decision gets made against. They are
+not yet surfaced in the interface.
 
 ## Sequencing
 

@@ -7,6 +7,16 @@ export const ICE_CONFIGURATION: RTCConfiguration = {
 };
 
 const INVITE_PREFIX = 'RUYD2-';
+
+const CHAT_CHANNEL = 'ruyd-chat';
+/** Stream frames and control. A stream that loses a chunk is broken, not degraded. */
+const TUNNEL_CHANNEL = 'ruyd-tunnel';
+/**
+ * Datagram frames. Unordered and unreliable on purpose: a game's UDP traffic already
+ * assumes both, and delivering it reliably would add head-of-line blocking to packets
+ * whose value expires in milliseconds.
+ */
+const TUNNEL_FAST_CHANNEL = 'ruyd-tunnel-fast';
 const HOST_POLL_INTERVAL_MS = 3_000;
 const PEER_POLL_INTERVAL_MS = 750;
 const CONNECT_TIMEOUT_MS = 30_000;
@@ -51,7 +61,10 @@ type Packet =
   | { type: 'peer_left'; name: string }
   | { type: 'chat'; name: string; text: string }
   /** Renegotiation between this pair only. Never relayed to another peer. */
-  | { type: 'negotiate'; signal: NegotiationSignal };
+  | { type: 'negotiate'; signal: NegotiationSignal }
+  /** The host is offering a game running on its machine. */
+  | { type: 'share'; forward: number; port: number }
+  | { type: 'unshare'; forward: number };
 
 export type ConnectionCallbacks = {
   onPeerJoined(name: string): void;
@@ -63,6 +76,11 @@ export type ConnectionCallbacks = {
   onReconnected(room: RoomInfo): void;
   /** A host cannot reach signaling. Connected peers are unaffected; new joins are not possible. */
   onSignalingDegraded(degraded: boolean): void;
+  /** Frames arrived from `peer` for the game tunnel. */
+  onTunnelData(peer: number, data: ArrayBuffer): void;
+  /** The host is offering a game. */
+  onGameShared(forward: number, port: number): void;
+  onGameUnshared(forward: number): void;
   /** The room ended and will not come back on its own. */
   onDisconnected(reason: string): void;
 };
@@ -76,8 +94,12 @@ export type RoomInfo = {
 
 type HostPeer = {
   name: string;
+  /** Stable identifier for this peer at the tunnel boundary. Never zero: the host is 0. */
+  slot: number;
   connection: RTCPeerConnection;
   channel: RTCDataChannel | null;
+  tunnel: RTCDataChannel | null;
+  tunnelFast: RTCDataChannel | null;
   /** Carries renegotiation with this peer once their channel is open. */
   negotiator: Negotiator | null;
   /**
@@ -241,6 +263,12 @@ function directFailure(): Error {
   return new Error('A direct tunnel could not be established between these networks. No port forwarding is required, but this network combination may require future relay access.');
 }
 
+const isForward = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 0xffff_ffff;
+
+const isPort = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 65_535;
+
 function isNegotiationSignal(value: unknown): value is NegotiationSignal {
   if (!value || typeof value !== 'object') return false;
   const signal = value as Record<string, unknown>;
@@ -274,6 +302,8 @@ export function parsePacket(value: unknown): Packet | null {
     if ((packet.type === 'peer_joined' || packet.type === 'peer_left') && typeof packet.name === 'string') return packet as Packet;
     if (packet.type === 'chat' && typeof packet.name === 'string' && typeof packet.text === 'string') return packet as Packet;
     if (packet.type === 'negotiate' && isNegotiationSignal(packet.signal)) return packet as Packet;
+    if (packet.type === 'share' && isForward(packet.forward) && isPort(packet.port)) return packet as Packet;
+    if (packet.type === 'unshare' && isForward(packet.forward)) return packet as Packet;
     return null;
   } catch {
     return null;
@@ -294,9 +324,14 @@ export class DirectConnectivity {
   private hostToken = '';
   private hostPeers = new Map<string, HostPeer>();
   private answerAttempts = new Map<string, number>();
+  private nextSlot = 1;
+  /** Ports this host is offering, so a peer that joins later is told about them too. */
+  private shared = new Map<number, number>();
   private clientConnection: RTCPeerConnection | null = null;
   private clientChannel: RTCDataChannel | null = null;
   private clientNegotiator: Negotiator | null = null;
+  private clientTunnel: RTCDataChannel | null = null;
+  private clientTunnelFast: RTCDataChannel | null = null;
   /** What a client needs to re-enter its room without asking the user for the code again. */
   private rejoin: { code: string; name: string } | null = null;
   private reconnecting = false;
@@ -350,8 +385,17 @@ export class DirectConnectivity {
     const peerToken = randomToken();
     const connection = new RTCPeerConnection(ICE_CONFIGURATION);
     this.clientConnection = connection;
-    const channel = connection.createDataChannel('ruyd-chat', { ordered: true });
+    const channel = connection.createDataChannel(CHAT_CHANNEL, { ordered: true });
     this.clientChannel = channel;
+    // Opened now rather than when a game is first shared. A channel added to a live
+    // connection would need renegotiating, and a channel nobody uses costs a line of SDP.
+    this.clientTunnel = connection.createDataChannel(TUNNEL_CHANNEL, { ordered: true });
+    this.clientTunnelFast = connection.createDataChannel(TUNNEL_FAST_CHANNEL, {
+      ordered: false,
+      maxRetransmits: 0,
+    });
+    this.bindTunnelChannel(this.clientTunnel, 0);
+    this.bindTunnelChannel(this.clientTunnelFast, 0);
     // A joining peer negotiates with the host alone, and yields when they collide.
     this.clientNegotiator = new Negotiator({
       connection,
@@ -499,15 +543,22 @@ export class DirectConnectivity {
     this.hostPeers.forEach((peer) => {
       peer.negotiator?.close();
       peer.channel?.close();
+      peer.tunnel?.close();
+      peer.tunnelFast?.close();
       peer.connection.close();
     });
     this.hostPeers.clear();
     this.answerAttempts.clear();
+    this.shared.clear();
     this.clientNegotiator?.close();
     this.clientChannel?.close();
+    this.clientTunnel?.close();
+    this.clientTunnelFast?.close();
     this.clientConnection?.close();
     this.clientNegotiator = null;
     this.clientChannel = null;
+    this.clientTunnel = null;
+    this.clientTunnelFast = null;
     this.clientConnection = null;
     this.abortController = null;
     this.roomId = '';
@@ -570,8 +621,11 @@ export class DirectConnectivity {
     const taken = [this.name, ...Array.from(this.hostPeers.values(), (candidate) => candidate.name)];
     const hostPeer: HostPeer = {
       name: disambiguate(peer.name, taken),
+      slot: this.nextSlot++,
       connection,
       channel: null,
+      tunnel: null,
+      tunnelFast: null,
       negotiator: null,
       announced: false,
     };
@@ -585,6 +639,18 @@ export class DirectConnectivity {
     this.hostPeers.set(peer.peerId, hostPeer);
 
     connection.addEventListener('datachannel', (event) => {
+      // Three channels arrive per peer. Which one this is comes from its label, not from
+      // the order they happen to open in.
+      if (event.channel.label === TUNNEL_CHANNEL) {
+        hostPeer.tunnel = event.channel;
+        this.bindTunnelChannel(event.channel, hostPeer.slot);
+        return;
+      }
+      if (event.channel.label === TUNNEL_FAST_CHANNEL) {
+        hostPeer.tunnelFast = event.channel;
+        this.bindTunnelChannel(event.channel, hostPeer.slot);
+        return;
+      }
       hostPeer.channel = event.channel;
       this.bindHostChannel(peer.peerId, hostPeer);
     });
@@ -618,6 +684,8 @@ export class DirectConnectivity {
       // Only now can renegotiation reach this peer, and only now is the initial
       // offer and answer from the signaling service finished with.
       peer.negotiator?.arm();
+      // A peer that joined after a game was offered still needs to hear about it.
+      this.shared.forEach((port, forward) => send(channel, { type: 'share', forward, port }));
       peer.announced = true;
       this.callbacks.onPeerJoined(peer.name);
       this.hostPeers.forEach((candidate, id) => {
@@ -641,6 +709,69 @@ export class DirectConnectivity {
       });
     });
     channel.addEventListener('close', () => this.removeHostPeer(peerId));
+  }
+
+  /**
+   * Offers a game on this machine to everyone in the room. Only a host can: a client's
+   * traffic would have to be relayed by the host to reach the other clients, and this
+   * stage carries game packets between two peers and no further.
+   */
+  shareGame(forward: number, port: number): void {
+    if (this.mode !== 'host') return;
+    this.shared.set(forward, port);
+    this.hostPeers.forEach((peer) => send(peer.channel, { type: 'share', forward, port }));
+  }
+
+  unshareGame(forward: number): void {
+    if (this.mode !== 'host') return;
+    this.shared.delete(forward);
+    this.hostPeers.forEach((peer) => send(peer.channel, { type: 'unshare', forward }));
+  }
+
+  /** Hands a tunnel frame to the peer it belongs to. Returns false if it went nowhere. */
+  sendTunnel(peer: number, data: Uint8Array, reliable: boolean): boolean {
+    const channel = peer === 0
+      ? (reliable ? this.clientTunnel : this.clientTunnelFast)
+      : this.hostPeerBySlot(peer)?.[reliable ? 'tunnel' : 'tunnelFast'] ?? null;
+    if (!channel || channel.readyState !== 'open') return false;
+    // A copy: the caller's view may be over a larger buffer, and the whole buffer would
+    // otherwise be sent.
+    channel.send(data.slice().buffer as ArrayBuffer);
+    return true;
+  }
+
+  /** Whether a peer's tunnel is ready to carry a game. */
+  tunnelReady(peer: number): boolean {
+    if (peer === 0) {
+      return this.clientTunnel?.readyState === 'open'
+        && this.clientTunnelFast?.readyState === 'open';
+    }
+    const host = this.hostPeerBySlot(peer);
+    return host?.tunnel?.readyState === 'open' && host?.tunnelFast?.readyState === 'open';
+  }
+
+  /** Every peer whose tunnel is currently usable. */
+  tunnelPeers(): number[] {
+    if (this.mode === 'client') return this.tunnelReady(0) ? [0] : [];
+    return Array.from(this.hostPeers.values())
+      .filter((peer) => this.tunnelReady(peer.slot))
+      .map((peer) => peer.slot);
+  }
+
+  private hostPeerBySlot(slot: number): HostPeer | null {
+    for (const peer of this.hostPeers.values()) {
+      if (peer.slot === slot) return peer;
+    }
+    return null;
+  }
+
+  private bindTunnelChannel(channel: RTCDataChannel, peer: number): void {
+    channel.binaryType = 'arraybuffer';
+    channel.addEventListener('message', (event) => {
+      // Frames are opaque here. They are validated where they are acted on, which is the
+      // only place that can tell a malformed one from a merely unexpected one.
+      if (event.data instanceof ArrayBuffer) this.callbacks.onTunnelData(peer, event.data);
+    });
   }
 
   private bindClientChannel(
@@ -670,6 +801,10 @@ export class DirectConnectivity {
         this.callbacks.onChat(packet.name, packet.text);
       } else if (packet.type === 'negotiate') {
         void this.clientNegotiator?.accept(packet.signal);
+      } else if (packet.type === 'share') {
+        this.callbacks.onGameShared(packet.forward, packet.port);
+      } else if (packet.type === 'unshare') {
+        this.callbacks.onGameUnshared(packet.forward);
       }
     });
     channel.addEventListener('close', () => {
@@ -685,6 +820,8 @@ export class DirectConnectivity {
     this.hostPeers.delete(peerId);
     peer.negotiator?.close();
     peer.channel?.close();
+    peer.tunnel?.close();
+    peer.tunnelFast?.close();
     peer.connection.close();
     if (peer.announced) {
       this.callbacks.onPeerLeft(peer.name);

@@ -23,7 +23,8 @@ pub struct Counters {
 }
 
 /// A point-in-time copy, safe to hand to the interface.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Metrics {
     pub datagrams_out: u64,
     pub datagrams_in: u64,

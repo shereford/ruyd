@@ -18,6 +18,9 @@ const silentCallbacks = (): ConnectionCallbacks => ({
   onReconnecting: () => undefined,
   onReconnected: () => undefined,
   onSignalingDegraded: () => undefined,
+  onTunnelData: () => undefined,
+  onGameShared: () => undefined,
+  onGameUnshared: () => undefined,
   onDisconnected: () => undefined,
 });
 
@@ -96,6 +99,23 @@ describe('data-channel packet validation', () => {
     expect(parsePacket('"a string"')).toBeNull();
     expect(parsePacket(JSON.stringify({ type: 'unknown' }))).toBeNull();
     expect(parsePacket(JSON.stringify({ hostName: 'Ada', peers: [] }))).toBeNull();
+  });
+
+  it('accepts a game offer and its withdrawal', () => {
+    expect(parsePacket(JSON.stringify({ type: 'share', forward: 1, port: 25565 })))
+      .toEqual({ type: 'share', forward: 1, port: 25565 });
+    expect(parsePacket(JSON.stringify({ type: 'unshare', forward: 1 })))
+      .toEqual({ type: 'unshare', forward: 1 });
+  });
+
+  it('refuses a game offer that is not a usable port', () => {
+    // A peer chooses these, so an out-of-range or fractional port must not reach the
+    // shell and become a bind attempt.
+    for (const port of [0, -1, 65_536, 1.5, '25565', null]) {
+      expect(parsePacket(JSON.stringify({ type: 'share', forward: 1, port }))).toBeNull();
+    }
+    expect(parsePacket(JSON.stringify({ type: 'share', port: 25565 }))).toBeNull();
+    expect(parsePacket(JSON.stringify({ type: 'unshare', forward: -1 }))).toBeNull();
   });
 
   it('drops packets whose fields have the wrong shape', () => {
